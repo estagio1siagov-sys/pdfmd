@@ -11,6 +11,7 @@ from .gemini_client import (
     validate_block,
 )
 from .merger import merge_blocks
+from .portoes import MARCA_BLOCO_AUSENTE, conferir
 from .splitter import split_pdf
 
 MAX_FIX_ATTEMPTS = 3
@@ -89,6 +90,16 @@ def run_pipeline(job):
                     "detalhes": "",
                     "blocked_by_policy": True,
                 })
+                # NAO usar `continue` puro aqui. O `continue` descartava o bloco em
+                # silencio: o .md saia sem aquelas paginas, o job terminava DONE, e o
+                # aviso ficava so na tela da fila - que ninguem le depois de baixar o
+                # ZIP. Medido no acervo do CRM-PB: um ato inteiro (PORTARIA CRM-PB
+                # no 16/2014) desapareceu sem deixar rastro no arquivo entregue.
+                # Agora o buraco vai DENTRO do artefato, onde viaja junto com ele.
+                converted_markdowns.append(
+                    f"{MARCA_BLOCO_AUSENTE}: paginas {block['start_page']}-"
+                    f"{block['end_page']} nao foram convertidas ({exc}) -->"
+                )
                 continue
 
             if not markdown:
@@ -167,6 +178,21 @@ def run_pipeline(job):
         job.save(update_fields=["current_step", "updated_at"])
 
         final_markdown = merge_blocks(converted_markdowns)
+
+        # Portoes deterministicos: rodam sem API, sobre o documento ja montado.
+        # Ate aqui o unico juiz da conversao era o proprio Gemini (validator_prompt) -
+        # juiz e reu do mesmo tribunal. Estes pegam o que a auto-validacao nao pega:
+        # hierarquia de titulo quebrada pela conversao bloco-a-bloco, PDF com mais de
+        # um ato autonomo, e blocos que nao entraram.
+        final_markdown, avisos_portoes = conferir(final_markdown)
+        if avisos_portoes:
+            flagged_blocks.append({
+                "index": 0,
+                "total": len(blocks),
+                "pages_label": "documento final",
+                "motivo": "Portões de recepção (SINGRA)",
+                "detalhes": "\n\n".join(avisos_portoes),
+            })
 
         result_name = Path(job.original_filename).stem + ".md"
         job.result_file.save(result_name, ContentFile(final_markdown.encode("utf-8")), save=False)

@@ -13,7 +13,8 @@ IGNORE COMPLETAMENTE (a ausência disso no Markdown é o comportamento CORRETO e
 - Avisos padronizados de rodapé sobre a natureza do documento (ex: "Este relatório é peça inerente à instrução do processo. Seu conteúdo NÃO constitui o posicionamento final do TCE-PB a respeito da matéria.", "Versão: Definitiva.").
 - Numeração automática de página e rodapés repetidos de identificação do processo que se repetem em todas as páginas apenas como carimbo (ex: "PN-TC 00018/10 - Proc. 01656/10" quando aparece isoladamente como rodapé, não como parte do texto corrido).
 - Rubricas: assinaturas manuscritas, iniciais ou rabiscos sobrepostos ao texto impresso (aparecem como texto ilegível/corrompido tipo "• 4'd'RNTcn'~ ~ l)()(" ou similar — isso é traço de caneta, NUNCA é texto real a ser transcrito).
-- Carimbos: qualquer conteúdo dentro de um carimbo (inclusive datas, números de processo, códigos), mesmo que pareça uma informação legítima como uma data de lei ou decreto. Se um número/data está estampado como carimbo (não faz parte do corpo do texto impresso original do documento), ele deve ser ignorado — não compare esse valor com o Markdown nem reprove por divergência nele.
+- Carimbos ADMINISTRATIVOS: conteúdo dentro de um carimbo de tramitação, protocolo, autenticação ou impressão (inclusive datas, números de processo, códigos).
+  EXCEÇÃO OBRIGATÓRIA — três carimbos são CONTEÚDO JURÍDICO e a ausência deles no Markdown É OMISSÃO SUBSTANTIVA, que deve ser reprovada normalmente e NUNCA marcada como "e_carimbo_rubrica_ou_ilegivel": (a) carimbo de REVOGAÇÃO ("REVOGADA pela Resolução CRM PB nº 0210/2025"); (b) referência de PUBLICAÇÃO ("Publicado no DOE de 18/02/2014 Pág 48", "Publicado no Diário Oficial do Estado da Paraíba"); (c) registro de DELIBERAÇÃO ("Aprovado em reunião plenária de 28/01/2014"). Estes dizem se a norma vale, desde quando e por decisão de quem. Se um número/data está estampado como carimbo (não faz parte do corpo do texto impresso original do documento), ele deve ser ignorado — não compare esse valor com o Markdown nem reprove por divergência nele.
 - Texto marcado como "[TRECHO ILEGÍVEL]" no Markdown é uma saída VÁLIDA e esperada quando o trecho correspondente no PDF é realmente ilegível, rasurado, rubrica ou carimbo — isso NÃO é omissão.
 - Diferenças triviais de espaçamento/OCR que não mudam o significado (ex: "00018/10" vs "00018 /10").
 
@@ -26,7 +27,9 @@ VERIFIQUE E REPROVE APENAS SE HOUVER:
 2 - ALUCINAÇÃO: conteúdo (palavra, número, valor, cláusula) presente no Markdown que NÃO existe no PDF original.
 3 - TABELAS INCORRETAS: tabela do PDF que não foi convertida para Markdown nativo (| | |), com linhas/colunas faltando, ou cabeçalhos hierárquicos pai/filho mal concatenados.
 4 - VALORES INCORRETOS: números, datas, valores monetários ou percentuais que não batem com o original (exceto diferenças triviais de espaçamento/OCR).
-5 - ESTRUTURA INCORRETA: hierarquia de títulos (#, ##, ###) que distorce a estrutura real do documento, a ponto de prejudicar a leitura.
+5 - ESTRUTURA INCORRETA: hierarquia de títulos (#, ##, ###) que distorce a estrutura real do documento. Reprove especificamente se houver mais de um # no trecho, ou se o # estiver em algo que não é o título do ato (anexo, cabeçalho do órgão, seção interna).
+6 - TEXTO CORRIGIDO: palavra que o PDF grafa de um jeito e o Markdown grafa de outro, "consertando" erro do próprio órgão (ex.: PDF "CONSIDERENDO" → Markdown "CONSIDERANDO"). Isso é ALUCINAÇÃO por normalização e deve ser reprovado — o acervo registra a norma como ela foi publicada.
+7 - ATO OMITIDO: o PDF contém mais de um ato autônomo (outro cabeçalho com espécie/número/ano, outro preâmbulo, outro fecho) e o Markdown transcreveu apenas o primeiro.
 
 Na dúvida entre reprovar por algo do rodapé/carimbo administrativo (que deve ser ignorado) ou por conteúdo jurídico real (que deve ser cobrado), SEMPRE penda para ignorar. O objetivo é aprovar transcrições fiéis ao conteúdo jurídico, não perseguir omissões de metadados administrativos.
 

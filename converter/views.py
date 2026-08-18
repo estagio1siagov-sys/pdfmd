@@ -58,6 +58,14 @@ def download_all(request):
         for job in jobs:
             name = Path(job.result_file.name).name
             base, ext = name.rsplit(".", 1) if "." in name else (name, "md")
+            # O aviso de revisao nao pode morrer na tela da fila. Quem baixa o ZIP e
+            # deposita os .md na pasta nao volta a essa tela - e um arquivo incompleto
+            # com nome normal e' indistinguivel de um arquivo integro. O sufixo carimba
+            # a duvida NO NOME, onde ela viaja junto com o artefato e onde a esteira de
+            # recepcao consegue barrar antes do acervamento.
+            if job.needs_review:
+                base = f"{base}__REVISAR"
+                name = f"{base}.{ext}"
             candidate = name
             counter = 2
             while candidate in used_names:
@@ -67,6 +75,16 @@ def download_all(request):
 
             with job.result_file.open("rb") as f:
                 zip_file.writestr(candidate, f.read())
+
+            if job.needs_review:
+                motivo = job.review_notes or "sem detalhe registrado"
+                zip_file.writestr(
+                    f"{Path(candidate).stem}.MOTIVO.txt",
+                    f"ARQUIVO: {candidate}\n"
+                    f"ORIGEM:  {job.original_filename}\n\n"
+                    f"Este .md NAO passou limpo pela conversao. Conferir antes de\n"
+                    f"depositar no acervo.\n\n{motivo}\n",
+                )
 
     buffer.seek(0)
     response = HttpResponse(buffer.getvalue(), content_type="application/zip")
