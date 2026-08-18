@@ -1,0 +1,191 @@
+{% extends "converter/base.html" %}
+
+{% block title %}Processando... · PDF para Markdown{% endblock %}
+
+{% block extra_style %}
+.card { max-width: 620px; }
+.job-card {
+  border: 1px solid var(--panel-border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  margin-bottom: 14px;
+  background: #12141c;
+}
+.job-card .name {
+  font-weight: 600;
+  margin-bottom: 6px;
+  word-break: break-all;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.badge {
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+}
+.badge.queued { background: #2b2f3d; color: var(--muted); }
+.badge.running { background: rgba(108,140,255,0.15); color: var(--accent); }
+.badge.done { background: rgba(62,207,142,0.15); color: var(--success); }
+.badge.failed { background: rgba(255,107,107,0.15); color: var(--error); }
+.badge.review { background: rgba(240,196,60,0.15); color: #f0c43c; }
+.job-card.review { border-color: rgba(240,196,60,0.4); }
+.job-card.review .bar-fill { background: #f0c43c; }
+.job-card .review-text {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: #f0c43c;
+  white-space: pre-wrap;
+}
+.job-card .status-label { font-size: 0.85rem; color: var(--muted); margin-bottom: 10px; }
+.bar-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  background: #21252f;
+  overflow: hidden;
+  border: 1px solid var(--panel-border);
+}
+.bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), #9db3ff);
+  transition: width .4s ease;
+}
+.job-card.done .bar-fill { background: var(--success); }
+.job-card.failed .bar-fill { background: var(--error); }
+.job-card a.download {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: var(--success);
+  font-weight: 600;
+  text-decoration: none;
+}
+.job-card .error-text {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: #ffb3b3;
+  white-space: pre-wrap;
+}
+.new-conversion { display: block; text-align: center; margin-top: 22px; color: var(--muted); font-size: 0.85rem; }
+.new-conversion a { color: var(--accent); }
+.download-all-bar { display: none; margin-bottom: 18px; }
+.download-all-bar.show { display: block; }
+.download-all-bar button {
+  width: 100%;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  background: var(--success);
+  color: #06231a;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+.download-all-bar button:hover { filter: brightness(1.05); }
+{% endblock %}
+
+{% block content %}
+<h1>📦 Fila de conversão</h1>
+<p class="subtitle">{{ jobs|length }} arquivo(s) na fila. Processados um de cada vez.</p>
+
+<div class="download-all-bar" id="download-all-bar">
+  <button type="button" id="download-all-btn">⬇ Baixar todos os concluídos (<span id="download-all-count">0</span>)</button>
+</div>
+
+<div id="jobs-container">
+  {% for job in jobs %}
+  <div class="job-card" id="job-{{ job.pk }}" data-job-id="{{ job.pk }}">
+    <div class="name">
+      <span>{{ job.original_filename }}</span>
+      <span class="badge queued" id="badge-{{ job.pk }}">na fila</span>
+    </div>
+    <div class="status-label" id="status-{{ job.pk }}">Aguardando...</div>
+    <div class="bar-track"><div class="bar-fill" id="bar-{{ job.pk }}" style="width:0%"></div></div>
+    <div id="extra-{{ job.pk }}"></div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="new-conversion">
+  <a href="{% url 'converter:upload' %}">Converter mais PDFs</a>
+</div>
+
+<script>
+  const jobIds = [{% for job in jobs %}{{ job.pk }}{% if not forloop.last %},{% endif %}{% endfor %}];
+  const statusUrlBase = "/job/";
+  const downloadAllUrl = "{% url 'converter:download_all' %}?ids=" + jobIds.join(',');
+
+  const badgeText = { queued: 'na fila', running: 'processando', done: 'concluído', failed: 'falhou' };
+  const doneJobs = new Set();
+
+  const downloadAllBar = document.getElementById('download-all-bar');
+  const downloadAllCount = document.getElementById('download-all-count');
+  document.getElementById('download-all-btn').addEventListener('click', () => {
+    window.location.href = downloadAllUrl;
+  });
+
+  function updateDownloadAllBar() {
+    downloadAllCount.textContent = doneJobs.size;
+    downloadAllBar.classList.toggle('show', doneJobs.size > 0);
+  }
+
+  async function pollJob(jobId) {
+    const card = document.getElementById('job-' + jobId);
+    const badge = document.getElementById('badge-' + jobId);
+    const statusLabel = document.getElementById('status-' + jobId);
+    const barFill = document.getElementById('bar-' + jobId);
+    const extra = document.getElementById('extra-' + jobId);
+
+    try {
+      const res = await fetch(statusUrlBase + jobId + '/status/');
+      const data = await res.json();
+
+      badge.className = 'badge ' + data.status;
+      badge.textContent = badgeText[data.status] || data.status;
+      statusLabel.textContent = data.step_label || 'Aguardando...';
+      barFill.style.width = data.progress_percent + '%';
+
+      if (data.status === 'done') {
+        doneJobs.add(jobId);
+        updateDownloadAllBar();
+        extra.innerHTML = '';
+        const link = document.createElement('a');
+        link.className = 'download';
+        link.href = data.result_url;
+        link.setAttribute('download', '');
+        link.textContent = '⬇ Baixar Markdown';
+        extra.appendChild(link);
+        if (data.needs_review) {
+          card.classList.add('review');
+          badge.className = 'badge review';
+          badge.textContent = 'concluído - precisa de revisão';
+          const reviewDiv = document.createElement('div');
+          reviewDiv.className = 'review-text';
+          reviewDiv.textContent = data.review_notes;
+          extra.appendChild(reviewDiv);
+        } else {
+          card.classList.add('done');
+        }
+        return;
+      }
+
+      if (data.status === 'failed') {
+        card.classList.add('failed');
+        extra.innerHTML = '<div class="error-text"></div>';
+        extra.querySelector('.error-text').textContent = data.error_message;
+        return;
+      }
+
+      setTimeout(() => pollJob(jobId), 1500);
+    } catch (e) {
+      setTimeout(() => pollJob(jobId), 3000);
+    }
+  }
+
+  jobIds.forEach(pollJob);
+</script>
+{% endblock %}

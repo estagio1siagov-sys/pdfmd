@@ -1,0 +1,145 @@
+{% extends "converter/base.html" %}
+
+{% block title %}PDF para Markdown{% endblock %}
+
+{% block extra_style %}
+.dropzone {
+  border: 2px dashed var(--panel-border);
+  border-radius: var(--radius);
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+  position: relative;
+}
+.dropzone.dragover { border-color: var(--accent); background: rgba(108,140,255,0.06); }
+.dropzone svg { opacity: .7; margin-bottom: 10px; pointer-events: none; }
+.filelist {
+  margin-top: 14px;
+  font-size: 0.85rem;
+  color: var(--accent);
+  text-align: center;
+  max-height: 140px;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+.filelist div { padding: 3px 0; border-bottom: 1px solid var(--panel-border); pointer-events: auto; }
+.dropzone > div:not(.filelist), .dropzone .hint { pointer-events: none; }
+.dropzone input[type="file"] {
+  display: none;
+}
+.hint { color: var(--muted); font-size: 0.85rem; margin-top: 8px; }
+button.submit {
+  width: 100%;
+  margin-top: 24px;
+  padding: 14px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+button.submit:hover { background: var(--accent-dark); }
+button.submit:disabled { background: #40465c; cursor: not-allowed; }
+.error-list { color: var(--error); font-size: 0.85rem; margin: 8px 0 0; padding-left: 18px; }
+{% endblock %}
+
+{% block content %}
+<h1>📄 → 📝 PDF para Markdown</h1>
+<p class="subtitle">Envie um ou mais PDFs jurídicos. Cada um será dividido em blocos, convertido e validado por IA. Os arquivos são processados um de cada vez, na ordem de envio.</p>
+
+<form method="post" enctype="multipart/form-data" id="upload-form">
+  {% csrf_token %}
+  <div class="dropzone" id="dropzone">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6c8cff" stroke-width="1.5">
+      <path d="M12 3v12m0-12 4 4m-4-4-4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div>Arraste um ou mais PDFs aqui ou clique para escolher</div>
+    <div class="hint">Apenas arquivos .pdf · limite total de 200 MB por envio</div>
+    <div class="filelist" id="filelist"></div>
+    <div class="hint" id="size-hint" style="display:none"></div>
+    {{ form.pdf_files }}
+  </div>
+
+  {% if form.pdf_files.errors %}
+    <ul class="error-list">
+      {% for error in form.pdf_files.errors %}<li>{{ error }}</li>{% endfor %}
+    </ul>
+  {% endif %}
+
+  <button type="submit" class="submit" id="submit-btn" disabled>Converter para Markdown</button>
+</form>
+
+<footer>Conversão auditada por IA · blocos de páginas validados antes da junção final</footer>
+
+<script>
+  const input = document.querySelector('input[type="file"]');
+  const dropzone = document.getElementById('dropzone');
+  const filelistEl = document.getElementById('filelist');
+  const sizeHint = document.getElementById('size-hint');
+  const submitBtn = document.getElementById('submit-btn');
+  const MAX_BYTES = 200 * 1024 * 1024;
+
+  function formatSize(bytes) {
+    if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / 1024).toFixed(0) + ' KB';
+  }
+
+  function renderFiles(fileList) {
+    filelistEl.innerHTML = '';
+    sizeHint.style.display = 'none';
+    if (!fileList.length) { submitBtn.disabled = true; return; }
+    let total = 0;
+    Array.from(fileList).forEach(f => {
+      total += f.size;
+      const div = document.createElement('div');
+      div.textContent = f.name + ' (' + formatSize(f.size) + ')';
+      filelistEl.appendChild(div);
+    });
+    const over = total > MAX_BYTES;
+    sizeHint.style.display = '';
+    sizeHint.style.color = over ? 'var(--error)' : 'var(--muted)';
+    sizeHint.textContent = 'Total: ' + formatSize(total) + (over ? ' — excede o limite de 200 MB' : '');
+    submitBtn.disabled = over;
+  }
+
+  input.addEventListener('change', () => renderFiles(input.files));
+
+  dropzone.addEventListener('click', () => input.click());
+
+  // Evita que o navegador abra o PDF numa aba nova se o usuário soltar
+  // fora da dropzone (comportamento padrão do browser para drag-and-drop de arquivos).
+  ['dragenter', 'dragover', 'drop'].forEach(evt =>
+    window.addEventListener(evt, e => e.preventDefault())
+  );
+
+  ['dragenter', 'dragover'].forEach(evt =>
+    dropzone.addEventListener(evt, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.add('dragover');
+    })
+  );
+  ['dragleave', 'drop'].forEach(evt =>
+    dropzone.addEventListener(evt, e => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropzone.classList.remove('dragover');
+    })
+  );
+  dropzone.addEventListener('drop', e => {
+    if (e.dataTransfer.files && e.dataTransfer.files.length) {
+      input.files = e.dataTransfer.files;
+      renderFiles(input.files);
+    }
+  });
+
+  document.getElementById('upload-form').addEventListener('submit', () => {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Enviando...';
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+Sua transcrição anterior deste mesmo trecho de PDF foi reprovada por um auditor por conter os problemas listados abaixo. Gere uma NOVA transcrição completa em Markdown deste PDF, corrigindo especificamente esses problemas, mas continuando a seguir TODAS as regras de formatação originais (estrutura, tabelas, fidelidade, diretrizes finais).
+
+PROBLEMAS APONTADOS PELO AUDITOR:
+{issues}
+
+TRANSCRIÇÃO ANTERIOR (com os problemas acima):
+{previous_markdown}
+
+IMPORTANTE: antes de corrigir, avalie se o "problema" apontado envolve rubrica (assinatura manuscrita/rabisco sobreposto ao texto), carimbo (incluindo datas, números ou textos estampados dentro de um carimbo) ou trecho genuinamente ilegível. Nesses casos, a transcrição correta é IGNORAR apenas o rabisco/carimbo em si, ou usar [TRECHO ILEGÍVEL] se realmente não der pra ler — não invente nem force um valor para "resolver" o apontamento. Porém, se o problema apontado for texto impresso/datilografado legível que está omitido (mesmo que próximo, atrás ou parcialmente sobreposto por uma rubrica ou carimbo), esse texto DEVE ser transcrito normalmente — a presença de uma rubrica/carimbo na região não é motivo para continuar omitindo texto impresso legível. Corrija de verdade apenas problemas de conteúdo jurídico real (texto corrido, artigos, tabelas, valores oficiais do corpo do documento).
+
+Gere a transcrição corrigida do zero, completa (todas as páginas do bloco), no mesmo formato. Não inclua comentários sobre a correção — apenas o Markdown corrigido.

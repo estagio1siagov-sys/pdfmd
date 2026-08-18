@@ -1,0 +1,36 @@
+# Ambiente virtual
+venv/
+env/
+.venv/
+
+# Variáveis de ambiente e segredos
+.env
+
+# Banco de dados local
+db.sqlite3
+db.sqlite3-journal
+
+# Arquivos de mídia (uploads e resultados gerados) — efêmeros de propósito
+media/
+
+# Arquivos estáticos coletados (gerados no deploy)
+staticfiles/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Logs e scratch
+server.log
+*.log
+
+# Editor / SO
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Instruções do agente de IA
+CLAUDE.md
