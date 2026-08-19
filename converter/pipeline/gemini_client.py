@@ -35,10 +35,30 @@ class _TokenBucket:
             time.sleep(wait)
 
 
-# 12 RPM por chave (margem de 3 abaixo do limite de 15), compartilhado entre workers.
-_bucket_converter   = _TokenBucket(rate_per_minute=12)
-_bucket_validator   = _TokenBucket(rate_per_minute=12)
-_bucket_reconverter = _TokenBucket(rate_per_minute=12)
+# Buckets agrupados por chave real: se duas etapas usam a mesma chave,
+# compartilham o mesmo bucket — evita somar RPM numa chave única.
+# Inicializado em _init_buckets() após o Django carregar as settings.
+_bucket_converter   = None
+_bucket_validator   = None
+_bucket_reconverter = None
+_buckets_by_key: dict = {}
+_buckets_lock = threading.Lock()
+
+
+def _get_or_create_bucket(api_key):
+    with _buckets_lock:
+        if api_key not in _buckets_by_key:
+            _buckets_by_key[api_key] = _TokenBucket(rate_per_minute=12)
+        return _buckets_by_key[api_key]
+
+
+def _init_buckets():
+    global _bucket_converter, _bucket_validator, _bucket_reconverter
+    if _bucket_converter is not None:
+        return
+    _bucket_converter   = _get_or_create_bucket(settings.GEMINI_API_KEY_CONVERTER)
+    _bucket_validator   = _get_or_create_bucket(settings.GEMINI_API_KEY_VALIDATOR)
+    _bucket_reconverter = _get_or_create_bucket(settings.GEMINI_API_KEY_RECONVERTER)
 
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
@@ -150,6 +170,7 @@ def convert_block_to_markdown(pdf_bytes, on_retry=None):
 
     @_rate_limit_retry(on_retry)
     def _call():
+        _init_buckets()
         _bucket_converter.acquire()
         client = get_client_converter()
         response = client.models.generate_content(
@@ -180,6 +201,7 @@ def reconvert_block_with_feedback(pdf_bytes, previous_markdown, issues_text, on_
 
     @_rate_limit_retry(on_retry)
     def _call():
+        _init_buckets()
         _bucket_reconverter.acquire()
         client = get_client_reconverter()
         response = client.models.generate_content(
@@ -243,6 +265,7 @@ def validate_block(pdf_bytes, markdown_text, on_retry=None):
 
     @_rate_limit_retry(on_retry)
     def _call():
+        _init_buckets()
         _bucket_validator.acquire()
         client = get_client_validator()
         response = client.models.generate_content(
