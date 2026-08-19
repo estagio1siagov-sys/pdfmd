@@ -30,7 +30,7 @@ Para tabelas de modelo/formulário sem dados:
 3 - FIDELIDADE E PRECISÃO
 Transcreva todo o conteúdo oficial (leis, ementas, decretos, atos).
 
-NÃO CORRIJA O DOCUMENTO. Erro de grafia do próprio órgão, dois artigos com o mesmo número, numeração fora de ordem, data que não bate com o ano: preserve exatamente como está. Se o original escreve "CONSLEHO" ou "CONSIDERENDO", transcreva "CONSLEHO" e "CONSIDERENDO". O acervo registra a norma como o órgão a publicou; correção silenciosa é adulteração, não zelo.
+NÃO CORRIJA O DOCUMENTO. Se você sentir vontade de corrigir uma palavra, NÃO FAÇA — escreva exatamente os caracteres que estão no PDF, incluindo letras trocadas, duplicadas ou faltando. Erro de grafia do próprio órgão, dois artigos com o mesmo número, numeração fora de ordem, data que não bate com o ano: preserve exatamente como está. Se o original escreve "CONSLEHO", transcreva "CONSLEHO". Se o original escreve "CONSIDRERANDO", transcreva "CONSIDRERANDO". Se o original escreve "CONSIDERENDO", transcreva "CONSIDERENDO". O acervo registra a norma como o órgão a publicou; correção silenciosa é adulteração, não zelo.
 
 TRÊS CARIMBOS SÃO CONTEÚDO OFICIAL E DEVEM SER TRANSCRITOS, apesar da regra geral sobre carimbos:
  (a) carimbo de REVOGAÇÃO — ex.: "REVOGADA pela Resolução CRM PB nº 0210/2025";

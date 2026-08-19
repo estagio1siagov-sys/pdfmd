@@ -28,7 +28,7 @@ VERIFIQUE E REPROVE APENAS SE HOUVER:
 3 - TABELAS INCORRETAS: tabela do PDF que não foi convertida para Markdown nativo (| | |), com linhas/colunas faltando, ou cabeçalhos hierárquicos pai/filho mal concatenados.
 4 - VALORES INCORRETOS: números, datas, valores monetários ou percentuais que não batem com o original (exceto diferenças triviais de espaçamento/OCR).
 5 - ESTRUTURA INCORRETA: hierarquia de títulos (#, ##, ###) que distorce a estrutura real do documento. Reprove especificamente se houver mais de um # no trecho, ou se o # estiver em algo que não é o título do ato (anexo, cabeçalho do órgão, seção interna).
-6 - TEXTO CORRIGIDO: palavra que o PDF grafa de um jeito e o Markdown grafa de outro, "consertando" erro do próprio órgão (ex.: PDF "CONSIDERENDO" → Markdown "CONSIDERANDO"). Isso é ALUCINAÇÃO por normalização e deve ser reprovado — o acervo registra a norma como ela foi publicada.
+6 - TEXTO CORRIGIDO: palavra que o PDF grafa de um jeito e o Markdown grafa de outro, "consertando" erro do próprio órgão. Exemplos reais medidos: PDF "CONSIDERENDO" → Markdown "CONSIDERANDO"; PDF "CONSIDRERANDO" → Markdown "CONSIDERANDO"; PDF "CONSLEHO" → Markdown "CONSELHO". Qualquer normalização assim é ALUCINAÇÃO e deve ser reprovada — o acervo registra a norma como ela foi publicada, erros incluídos.
 7 - ATO OMITIDO: o PDF contém mais de um ato autônomo (outro cabeçalho com espécie/número/ano, outro preâmbulo, outro fecho) e o Markdown transcreveu apenas o primeiro.
 
 Na dúvida entre reprovar por algo do rodapé/carimbo administrativo (que deve ser ignorado) ou por conteúdo jurídico real (que deve ser cobrado), SEMPRE penda para ignorar. O objetivo é aprovar transcrições fiéis ao conteúdo jurídico, não perseguir omissões de metadados administrativos.
