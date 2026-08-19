@@ -34,3 +34,6 @@ Thumbs.db
 
 # Instruções do agente de IA
 CLAUDE.md
+
+# Patches aplicados
+*.patch
