@@ -150,6 +150,33 @@ def blocos_ausentes(markdown):
     return [l.strip() for _, l in _fora_de_codigo(markdown) if MARCA_BLOCO_AUSENTE in l]
 
 
+_ASPAS = re.compile(r'["\'“”‘’]([^"\'“”‘’]{2,80})["\'“”‘’]')
+
+
+def filtra_trechos_resolvidos(trechos, texto_final):
+    """Segunda checagem, sem API, sobre a reprovacao do validador.
+
+    O validador roda numa versao do bloco; o texto que de fato vai pro arquivo e' a
+    versao seguinte, ja reconvertida. Se o validador aponta "a palavra 'X' do PDF virou
+    'Y' no Markdown" e o termo 'X' (o original, entre aspas, sempre o primeiro citado -
+    ver validator_prompt item 6) ja esta presente ao pe' da letra no texto final, a
+    reprovacao ficou obsoleta: o defeito apontado nao existe na versao entregue. Medido
+    no CRM-PB: reprovacao citando 'CONSIDRERANDO' -> 'CONSIDERANDO' sobrevivia no
+    review_notes mesmo com 'CONSIDRERANDO' ja correto no .md salvo.
+
+    So descarta o item quando ha um termo citavel entre aspas E ele bate contra o texto
+    final. Sem aspas na descricao, nao ha como checar deterministicamente - mantem o
+    item por seguranca (falso negativo aqui e' pior que mostrar um aviso a mais).
+    """
+    resolvidos = []
+    for trecho in trechos:
+        termos = _ASPAS.findall(trecho.get("descricao", ""))
+        if termos and termos[0] in texto_final:
+            continue
+        resolvidos.append(trecho)
+    return resolvidos
+
+
 def conferir(markdown):
     """Roda tudo e devolve (markdown_corrigido, avisos). Avisos nao vazios => needs_review."""
     corrigido, mudancas = rebaixar_h1_extras(markdown)

@@ -41,6 +41,7 @@ GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
 GEMINI_API_KEY_CONVERTER   = os.environ.get('GEMINI_API_KEY_CONVERTER', '') or GEMINI_API_KEY
 GEMINI_API_KEY_VALIDATOR   = os.environ.get('GEMINI_API_KEY_VALIDATOR', '') or GEMINI_API_KEY
 GEMINI_API_KEY_RECONVERTER = os.environ.get('GEMINI_API_KEY_RECONVERTER', '') or GEMINI_API_KEY
+GEMINI_API_KEY_META        = os.environ.get('GEMINI_API_KEY_META', '') or GEMINI_API_KEY
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-3.1-flash-lite')
 PDF_BLOCK_SIZE = int(os.environ.get('PDF_BLOCK_SIZE', '5'))
 

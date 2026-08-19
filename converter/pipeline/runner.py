@@ -8,10 +8,11 @@ from .gemini_client import (
     BlockedByPolicyError,
     convert_block_to_markdown,
     reconvert_block_with_feedback,
+    recheck_flagged_issues,
     validate_block,
 )
 from .merger import merge_blocks
-from .portoes import MARCA_BLOCO_AUSENTE, conferir
+from .portoes import MARCA_BLOCO_AUSENTE, conferir, filtra_trechos_resolvidos
 from .splitter import split_pdf
 
 MAX_FIX_ATTEMPTS = 3
@@ -153,15 +154,33 @@ def run_pipeline(job):
                 # inteiro, aceita a última versão gerada (melhor esforço) e sinaliza
                 # o bloco para revisão manual do usuário.
                 validated_markdown = markdown
-                motivo = last_validation.get("motivo", "motivo não informado") if last_validation else "desconhecido"
-                detalhes = _format_issues(last_validation) if last_validation else ""
-                flagged_blocks.append({
-                    "index": index,
-                    "total": len(blocks),
-                    "pages_label": pages_label,
-                    "motivo": motivo,
-                    "detalhes": detalhes,
-                })
+
+                trechos_originais = last_validation.get("trechos_problematicos", []) if last_validation else []
+                # 1) Portão determinístico (grátis, sem API): descarta itens cujo termo
+                # citado entre aspas já está presente, ao pé da letra, na versão final —
+                # só pega os casos óbvios de PDF com camada de texto. Ver
+                # filtra_trechos_resolvidos().
+                trechos = filtra_trechos_resolvidos(trechos_originais, validated_markdown)
+                # 2) Auditor de segunda instância (API dedicada, GEMINI_API_KEY_META):
+                # pega o resto, incluindo PDF escaneado sem texto extraível — reexamina
+                # cada item que sobrou contra o markdown final de verdade, não contra a
+                # versão que o validador original viu. Fail-safe: qualquer falha devolve
+                # os itens intactos, nunca esconde aviso por erro técnico.
+                if trechos:
+                    trechos = recheck_flagged_issues(
+                        block["pdf_bytes"], validated_markdown, trechos, on_retry,
+                    )
+
+                if trechos or not trechos_originais:
+                    motivo = last_validation.get("motivo", "motivo não informado") if last_validation else "desconhecido"
+                    detalhes = _format_trechos(trechos) if trechos else ""
+                    flagged_blocks.append({
+                        "index": index,
+                        "total": len(blocks),
+                        "pages_label": pages_label,
+                        "motivo": motivo,
+                        "detalhes": detalhes,
+                    })
 
             converted_markdowns.append(validated_markdown)
 
@@ -261,11 +280,23 @@ def _format_review_notes(flagged_blocks):
 
 
 def _format_issues(validation):
+    """Motivo geral + trechos — usado no feedback mandado de volta pro Gemini na
+    reconversão (`reconvert_prompt.txt`), onde repetir o motivo geral ajuda o modelo."""
     motivo = validation.get("motivo", "")
     trechos = validation.get("trechos_problematicos", [])
     linhas = [f"Motivo geral: {motivo}"] if motivo else []
-    linhas += [f"- [{t.get('tipo')}] {t.get('descricao')}" for t in trechos]
+    linhas += _linhas_trechos(trechos)
     return "\n".join(linhas)
+
+
+def _format_trechos(trechos):
+    """Só os trechos, sem repetir o motivo geral — usado no review_notes exibido ao
+    usuário, cujo header já mostra o motivo (ver _format_review_notes)."""
+    return "\n".join(_linhas_trechos(trechos))
+
+
+def _linhas_trechos(trechos):
+    return [f"- [{t.get('tipo')}] {t.get('descricao')}" for t in trechos]
 
 
 def _is_rate_limit_exhausted(exc):

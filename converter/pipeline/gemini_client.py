@@ -66,10 +66,12 @@ _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 CONVERTER_PROMPT = (_PROMPTS_DIR / "converter_prompt.txt").read_text(encoding="utf-8")
 VALIDATOR_PROMPT = (_PROMPTS_DIR / "validator_prompt.txt").read_text(encoding="utf-8")
 RECONVERT_PROMPT_TEMPLATE = (_PROMPTS_DIR / "reconvert_prompt.txt").read_text(encoding="utf-8")
+META_VALIDATOR_PROMPT_TEMPLATE = (_PROMPTS_DIR / "meta_validator_prompt.txt").read_text(encoding="utf-8")
 
 _client_converter   = None
 _client_validator   = None
 _client_reconverter = None
+_client_meta        = None
 
 # Retry apenas para erro de limite de requisições (429 / RESOURCE_EXHAUSTED).
 # Espera crescente: 30s, 60s, 90s, 120s entre as até 5 tentativas.
@@ -113,6 +115,13 @@ def get_client_default():
     if _client_default is None:
         _client_default = _make_client(settings.GEMINI_API_KEY, "GEMINI_API_KEY")
     return _client_default
+
+
+def get_client_meta():
+    global _client_meta
+    if _client_meta is None:
+        _client_meta = _make_client(settings.GEMINI_API_KEY_META, "GEMINI_API_KEY_META")
+    return _client_meta
 
 
 def _should_fallback_to_default(exc, primary_key):
@@ -353,3 +362,89 @@ def validate_block(pdf_bytes, markdown_text, on_retry=None):
         result = _call_fallback()
 
     return _sanitize_validation(result)
+
+
+META_RECHECK_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "itens": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "ainda_procede": {"type": "BOOLEAN"},
+                    "justificativa": {"type": "STRING"},
+                },
+                "required": ["ainda_procede", "justificativa"],
+            },
+        },
+    },
+    "required": ["itens"],
+}
+
+
+def recheck_flagged_issues(pdf_bytes, final_markdown, trechos, on_retry=None):
+    """Auditor de segunda instância, com chave/conta dedicada (GEMINI_API_KEY_META).
+
+    Reexamina, um por um, os `trechos_problematicos` que sobraram depois do fix loop,
+    contra a versão FINAL do markdown (a que de fato vai pro arquivo) — não contra a
+    versão que o validador original viu. Existe porque o validador comum pode reprovar
+    em cima de uma versão que já foi corrigida numa reconversão seguinte (medido: reprova
+    citando 'CONSIDRERANDO'→'CONSIDERANDO' mesmo com a grafia já preservada no .md salvo).
+
+    Fail-safe estrito: qualquer falha (rede, JSON quebrado, contagem de itens não bate)
+    devolve `trechos` INTACTO. Só remove um item quando a resposta confirma
+    explicitamente `ainda_procede: false` — nunca esconde aviso por falha técnica.
+    """
+    if not trechos:
+        return trechos
+
+    itens_txt = "\n".join(
+        f"{i}. [{t.get('tipo')}] {t.get('descricao')}" for i, t in enumerate(trechos, start=1)
+    )
+    prompt = META_VALIDATOR_PROMPT_TEMPLATE.replace("{itens_para_reexaminar}", itens_txt)
+
+    def _generate(client):
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=[
+                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                f"MARKDOWN FINAL:\n\n{final_markdown}",
+                prompt,
+            ],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=META_RECHECK_SCHEMA,
+            ),
+        )
+        raw = response.text
+        if not raw:
+            raise ValueError("Gemini retornou resposta vazia no recheck.")
+        return json.loads(raw)
+
+    @_rate_limit_retry(on_retry)
+    def _call_primary():
+        _get_or_create_bucket(settings.GEMINI_API_KEY_META).acquire()
+        return _generate(get_client_meta())
+
+    try:
+        result = _call_primary()
+    except Exception as exc:
+        if not _should_fallback_to_default(exc, settings.GEMINI_API_KEY_META):
+            return trechos
+
+        try:
+            @_rate_limit_retry(on_retry)
+            def _call_fallback():
+                _get_or_create_bucket(settings.GEMINI_API_KEY).acquire()
+                return _generate(get_client_default())
+
+            result = _call_fallback()
+        except Exception:
+            return trechos
+
+    itens = result.get("itens", [])
+    if len(itens) != len(trechos):
+        return trechos
+
+    return [t for t, item in zip(trechos, itens) if item.get("ainda_procede", True)]
