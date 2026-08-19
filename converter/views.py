@@ -89,6 +89,18 @@ def download_all(request):
     buffer.seek(0)
     response = HttpResponse(buffer.getvalue(), content_type="application/zip")
     response["Content-Disposition"] = 'attachment; filename="markdowns_convertidos.zip"'
+
+    # Limpa jobs e arquivos após montar o ZIP — não há razão para guardar após o download.
+    for job in jobs:
+        try:
+            if job.original_pdf:
+                job.original_pdf.delete(save=False)
+            if job.result_file:
+                job.result_file.delete(save=False)
+        except Exception:
+            pass
+    jobs.delete()
+
     return response
 
 

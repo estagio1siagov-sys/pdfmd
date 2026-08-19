@@ -153,12 +153,6 @@
         doneJobs.add(jobId);
         updateDownloadAllBar();
         extra.innerHTML = '';
-        const link = document.createElement('a');
-        link.className = 'download';
-        link.href = data.result_url;
-        link.setAttribute('download', '');
-        link.textContent = '⬇ Baixar Markdown';
-        extra.appendChild(link);
         if (data.needs_review) {
           card.classList.add('review');
           badge.className = 'badge review';

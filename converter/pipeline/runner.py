@@ -195,6 +195,13 @@ def run_pipeline(job):
             })
 
         result_name = Path(job.original_filename).stem + ".md"
+        # Apaga arquivo anterior se existir — evita que o Django gere nomes com hash
+        # aleatório (ex: 172_2015_2h0X86C.md) quando o job é reconvertido.
+        if job.result_file:
+            try:
+                job.result_file.delete(save=False)
+            except Exception:
+                pass
         job.result_file.save(result_name, ContentFile(final_markdown.encode("utf-8")), save=False)
 
         job.status = ConversionJob.STATUS_DONE
