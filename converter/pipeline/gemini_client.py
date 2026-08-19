@@ -105,6 +105,29 @@ def get_client_reconverter():
     return _client_reconverter
 
 
+_client_default = None
+
+
+def get_client_default():
+    global _client_default
+    if _client_default is None:
+        _client_default = _make_client(settings.GEMINI_API_KEY, "GEMINI_API_KEY")
+    return _client_default
+
+
+def _should_fallback_to_default(exc, primary_key):
+    """Só troca pra chave genérica se: (a) o erro é RPM estourado (não quota
+    diária, não bloqueio de projeto/403), (b) existe uma GEMINI_API_KEY genérica
+    configurada, e (c) ela é DIFERENTE da chave que acabou de falhar (senão
+    bateria no mesmo limite de novo)."""
+    if not _is_rate_limit_error(exc):
+        return False
+    if isinstance(exc, errors.APIError) and getattr(exc, "code", None) != 429:
+        return False
+    default_key = settings.GEMINI_API_KEY
+    return bool(default_key) and default_key != primary_key
+
+
 def _blocked_reason(response):
     try:
         candidates = response.candidates or []
@@ -168,11 +191,7 @@ def convert_block_to_markdown(pdf_bytes, on_retry=None):
     é chamado antes de cada nova tentativa, útil para atualizar a UI.
     """
 
-    @_rate_limit_retry(on_retry)
-    def _call():
-        _init_buckets()
-        _bucket_converter.acquire()
-        client = get_client_converter()
+    def _generate(client):
         response = client.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents=[
@@ -186,7 +205,24 @@ def convert_block_to_markdown(pdf_bytes, on_retry=None):
             raise BlockedByPolicyError(reason)
         return text
 
-    return _call()
+    @_rate_limit_retry(on_retry)
+    def _call_primary():
+        _init_buckets()
+        _bucket_converter.acquire()
+        return _generate(get_client_converter())
+
+    try:
+        return _call_primary()
+    except Exception as exc:
+        if not _should_fallback_to_default(exc, settings.GEMINI_API_KEY_CONVERTER):
+            raise
+
+        @_rate_limit_retry(on_retry)
+        def _call_fallback():
+            _get_or_create_bucket(settings.GEMINI_API_KEY).acquire()
+            return _generate(get_client_default())
+
+        return _call_fallback()
 
 
 def reconvert_block_with_feedback(pdf_bytes, previous_markdown, issues_text, on_retry=None):
@@ -199,11 +235,7 @@ def reconvert_block_with_feedback(pdf_bytes, previous_markdown, issues_text, on_
         .replace("{previous_markdown}", previous_markdown)
     )
 
-    @_rate_limit_retry(on_retry)
-    def _call():
-        _init_buckets()
-        _bucket_reconverter.acquire()
-        client = get_client_reconverter()
+    def _generate(client):
         response = client.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents=[
@@ -213,7 +245,24 @@ def reconvert_block_with_feedback(pdf_bytes, previous_markdown, issues_text, on_
         )
         return (response.text or "").strip()
 
-    return _call()
+    @_rate_limit_retry(on_retry)
+    def _call_primary():
+        _init_buckets()
+        _bucket_reconverter.acquire()
+        return _generate(get_client_reconverter())
+
+    try:
+        return _call_primary()
+    except Exception as exc:
+        if not _should_fallback_to_default(exc, settings.GEMINI_API_KEY_RECONVERTER):
+            raise
+
+        @_rate_limit_retry(on_retry)
+        def _call_fallback():
+            _get_or_create_bucket(settings.GEMINI_API_KEY).acquire()
+            return _generate(get_client_default())
+
+        return _call_fallback()
 
 
 VALIDATION_SCHEMA = {
@@ -263,11 +312,7 @@ def validate_block(pdf_bytes, markdown_text, on_retry=None):
     Mesma política de retry em caso de erro 429 descrita em `convert_block_to_markdown`.
     """
 
-    @_rate_limit_retry(on_retry)
-    def _call():
-        _init_buckets()
-        _bucket_validator.acquire()
-        client = get_client_validator()
+    def _generate(client):
         response = client.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents=[
@@ -288,4 +333,23 @@ def validate_block(pdf_bytes, markdown_text, on_retry=None):
             )
         return json.loads(raw)
 
-    return _sanitize_validation(_call())
+    @_rate_limit_retry(on_retry)
+    def _call_primary():
+        _init_buckets()
+        _bucket_validator.acquire()
+        return _generate(get_client_validator())
+
+    try:
+        result = _call_primary()
+    except Exception as exc:
+        if not _should_fallback_to_default(exc, settings.GEMINI_API_KEY_VALIDATOR):
+            raise
+
+        @_rate_limit_retry(on_retry)
+        def _call_fallback():
+            _get_or_create_bucket(settings.GEMINI_API_KEY).acquire()
+            return _generate(get_client_default())
+
+        result = _call_fallback()
+
+    return _sanitize_validation(result)
