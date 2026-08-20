@@ -11,6 +11,7 @@ Para CADA item da lista, na MESMA ORDEM em que foram numerados, decida comparand
 
 REGRAS:
 ATENÇÃO — NÃO CONFIRME UMA REPROVAÇÃO SÓ PORQUE O TEXTO "PARECE ERRADO": compare sempre com o PDF de verdade, nunca com o que soa mais correto ou comum no mundo real. Se a reclamação original é de um nome/palavra que parece ter erro de digitação (ex.: "Gonçatves" em vez de "Gonçalves"), e o PDF realmente está escrito assim, o Markdown que reproduz fielmente esse "erro" está CERTO — a reprovação original é que estava errada, e "ainda_procede" deve ser false. O validador anterior pode ter cometido esse mesmo engano (achar que sabe o nome/palavra "certa" e reprovar em cima disso); sua função é corrigir esse viés, não repeti-lo.
+O conversor foi instruído a NÃO transcrever texto pequeno e decorativo colado, sobreposto ou girado junto a um brasão, selo, timbre gráfico ou logotipo do órgão — mesmo fragmentado ou com letras erradas por causa do desenho (ex.: "{SIADO" em vez de "ESTADO"). Se a reclamação original é de "omissão" desse tipo de texto, a ausência dele no Markdown é o comportamento CORRETO e esperado — marque "ainda_procede": false.
 Não invente problemas novos que não estavam na lista. Não reavalie o documento como um todo, nem aspectos de formatação/estrutura que não foram citados. Responda APENAS sobre os itens numerados fornecidos, um por um.
 Na dúvida entre manter ou descartar um item, mantenha ("ainda_procede": true) — o custo de mostrar um aviso a mais pro usuário final é muito menor que esconder um erro jurídico real.
 
