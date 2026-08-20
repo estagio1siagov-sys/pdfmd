@@ -44,6 +44,8 @@ REMOVA O RODAPÉ INSTITUCIONAL, que é o papel timbrado e não a norma. No CRM-P
  E-mail: crmpb@crmpb.org.br | Site: http://www.crmpb.org.br
 Remova também as variantes com erro de OCR (crmpb.ora.br, htlp:llwww, 10.764.033~001-61) e o caso em que o rodapé aparece FUNDIDO ao parágrafo anterior, sem quebra de linha — aí corte só o trecho do rodapé e preserve o parágrafo. A régua: o que identifica o ATO ou a sua PUBLICAÇÃO fica; o que identifica o PAPEL sai.
 
+REMOVA TAMBÉM texto pequeno e decorativo colado, sobreposto ou girado junto a um brasão, selo, timbre gráfico ou logotipo do órgão — mesmo quando vier fragmentado, cortado ou com letras faltando/erradas por causa do formato do desenho (ex.: "{SIADO" em vez de "ESTADO", legenda circular ao redor de um selo). Isso NÃO é cabeçalho de página nem título de seção — não vira `##`, some junto com o elemento gráfico. Regra de escopo, não de conteúdo: se o texto está solto na página, em posição normal de cabeçalho/rodapé, ele fica e vira `##` (cabeçalho do órgão); só sai quando está fisicamente atrelado ao desenho do brasão/selo/logo.
+
 CONTEÚDO QUE SÓ EXISTE COMO IMAGEM (organograma, fluxograma, tabela digitalizada, quadro em figura): transcreva E DECLARE, com esta linha imediatamente antes:
  **[TRANSCRIÇÃO DE IMAGEM — organograma do Anexo I]**
 A conferência de recepção compara a sua transcrição com o texto extraível do PDF, e o extrator não enxerga imagem. Transcrição sem essa marca é lida como conteúdo inventado, e a entrega reprova mesmo estando certa.

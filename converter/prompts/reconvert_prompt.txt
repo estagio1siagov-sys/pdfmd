@@ -1,4 +1,4 @@
-Sua transcrição anterior deste mesmo trecho de PDF foi reprovada por um auditor por conter os problemas listados abaixo. Gere uma NOVA transcrição completa em Markdown deste PDF, corrigindo especificamente esses problemas, mas continuando a seguir TODAS as regras de formatação originais (estrutura, tabelas, fidelidade, diretrizes finais).
+Sua transcrição anterior deste mesmo trecho de PDF foi reprovada por um auditor por conter os problemas listados abaixo. Gere uma NOVA transcrição completa em Markdown deste PDF, corrigindo especificamente esses problemas, mas continuando a seguir TODAS as regras de formatação repetidas acima (estrutura, tabelas, fidelidade, diretrizes finais) — elas continuam valendo integralmente, não foram substituídas por este pedido de correção.
 
 PROBLEMAS APONTADOS PELO AUDITOR:
 {issues}

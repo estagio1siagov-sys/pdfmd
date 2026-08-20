@@ -238,10 +238,17 @@ def reconvert_block_with_feedback(pdf_bytes, previous_markdown, issues_text, on_
     """Reenvia o sub-PDF pedindo uma nova transcrição que corrija os problemas
     apontados pelo validador na tentativa anterior."""
 
+    # Reenvia o CONVERTER_PROMPT inteiro junto — sem isso, a reconversão só via as
+    # regras de formatação por uma linha de referência vaga ("siga as regras originais"),
+    # sem o conteúdo delas. Cada reconversão "esquecia" um pouco mais de negrito, tabela
+    # hierárquica, estrutura de título etc — perda que se acumulava a cada rodada do fix
+    # loop (medido: quanto mais reconversões, mais formatação sumia).
     prompt = (
-        RECONVERT_PROMPT_TEMPLATE
-        .replace("{issues}", issues_text)
-        .replace("{previous_markdown}", previous_markdown)
+        CONVERTER_PROMPT
+        + "\n\n---\n\n"
+        + RECONVERT_PROMPT_TEMPLATE
+            .replace("{issues}", issues_text)
+            .replace("{previous_markdown}", previous_markdown)
     )
 
     def _generate(client):

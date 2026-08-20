@@ -171,9 +171,30 @@ def run_pipeline(job):
                         block["pdf_bytes"], validated_markdown, trechos, on_retry,
                     )
 
-                if trechos or not trechos_originais:
+                if trechos:
+                    # O "motivo geral" da última validação foi escrito olhando a versão
+                    # DE ANTES dos filtros — pode citar item que já foi descartado (ex:
+                    # reprovação mencionava CONSIDERENDO→CONSIDERANDO no resumo, mas o
+                    # item específico já tinha sumido da lista). Motivo mostrado ao
+                    # usuário passa a vir só do que sobreviveu, nunca do texto velho.
+                    motivo = (
+                        trechos[0]["descricao"] if len(trechos) == 1
+                        else f"{len(trechos)} problema(s) confirmados após reconversão e checagem:"
+                    )
+                    detalhes = _format_trechos(trechos)
+                    flagged_blocks.append({
+                        "index": index,
+                        "total": len(blocks),
+                        "pages_label": pages_label,
+                        "motivo": motivo,
+                        "detalhes": detalhes,
+                    })
+                elif not trechos_originais:
+                    # Reprovação sem itens estruturados (só motivo geral em texto livre)
+                    # — não há como filtrar deterministicamente nem reexaminar por item,
+                    # mantém como estava por segurança.
                     motivo = last_validation.get("motivo", "motivo não informado") if last_validation else "desconhecido"
-                    detalhes = _format_trechos(trechos) if trechos else ""
+                    detalhes = ""
                     flagged_blocks.append({
                         "index": index,
                         "total": len(blocks),
