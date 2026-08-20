@@ -137,6 +137,43 @@ def _should_fallback_to_default(exc, primary_key):
     return bool(default_key) and default_key != primary_key
 
 
+TRUNCATION_MAX_ATTEMPTS = 3
+TRUNCATION_WAIT_SECONDS = 3
+
+
+def _is_truncated(response):
+    """True se a resposta parou por estouro de tokens (MAX_TOKENS) — sinal de corte
+    no meio do conteúdo, não de bloqueio de safety/copyright (isso é outro finish_reason)."""
+    try:
+        candidates = response.candidates or []
+        if not candidates:
+            return False
+        finish_reason = getattr(candidates[0], "finish_reason", None)
+        name = getattr(finish_reason, "name", str(finish_reason))
+        return name == "MAX_TOKENS"
+    except Exception:
+        return False
+
+
+def _call_with_truncation_guard(generate_fn):
+    """Reexecuta até TRUNCATION_MAX_ATTEMPTS vezes quando a resposta vem vazia ou
+    cortada (MAX_TOKENS) — medido: sob instabilidade/rate-limit na nuvem, o Gemini
+    às vezes devolve texto interrompido no meio da frase (ex.: reconversão do 167_2014
+    terminando em "Em" sem a data), e isso passava direto pro arquivo final sem
+    nenhuma tentativa nova. Sempre devolve o MELHOR texto obtido — se ainda estiver
+    cortado depois de todas as tentativas, aceita como está (nunca lança exceção por
+    isso, quem chama decide o que fazer com um resultado ainda vazio)."""
+    text = ""
+    for attempt in range(TRUNCATION_MAX_ATTEMPTS):
+        response = generate_fn()
+        text = (response.text or "").strip()
+        if text and not _is_truncated(response):
+            return text, response
+        if attempt < TRUNCATION_MAX_ATTEMPTS - 1:
+            time.sleep(TRUNCATION_WAIT_SECONDS)
+    return text, response
+
+
 def _blocked_reason(response):
     try:
         candidates = response.candidates or []
@@ -201,14 +238,16 @@ def convert_block_to_markdown(pdf_bytes, on_retry=None):
     """
 
     def _generate(client):
-        response = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=[
-                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
-                CONVERTER_PROMPT,
-            ],
-        )
-        text = (response.text or "").strip()
+        def _do_call():
+            return client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=[
+                    types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                    CONVERTER_PROMPT,
+                ],
+            )
+
+        text, response = _call_with_truncation_guard(_do_call)
         if not text:
             reason = _blocked_reason(response)
             raise BlockedByPolicyError(reason)
@@ -252,14 +291,20 @@ def reconvert_block_with_feedback(pdf_bytes, previous_markdown, issues_text, on_
     )
 
     def _generate(client):
-        response = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=[
-                types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
-                prompt,
-            ],
-        )
-        return (response.text or "").strip()
+        def _do_call():
+            return client.models.generate_content(
+                model=settings.GEMINI_MODEL,
+                contents=[
+                    types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
+                    prompt,
+                ],
+            )
+
+        text, _response = _call_with_truncation_guard(_do_call)
+        # Vazio mesmo após as tentativas do guard: não há nada melhor que a reconversão
+        # possa oferecer aqui. Mantém a versão anterior (imperfeita, mas íntegra) em vez
+        # de substituir por texto vazio/cortado — nunca piora o que já existia.
+        return text or previous_markdown
 
     @_rate_limit_retry(on_retry)
     def _call_primary():
