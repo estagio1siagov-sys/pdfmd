@@ -152,6 +152,17 @@ def blocos_ausentes(markdown):
 
 _ASPAS = re.compile(r'["\'“”‘’]([^"\'“”‘’]{2,80})["\'“”‘’]')
 
+# So estes tipos podem ser descartados pela presenca literal do termo. Para eles, o termo
+# citado ESTAR no texto final prova que o defeito sumiu: se a palavra omitida aparece, nao
+# ha mais omissao; se a grafia original foi restituida, nao ha mais texto corrigido.
+# FORA DA LISTA, de proposito: 'tabela_incorreta' e 'estrutura_incorreta'. Neles o defeito
+# e' de FORMA, e o termo continua presente enquanto a forma continua errada - uma tabela
+# achatada em texto corrido contem o proprio cabecalho que a descricao cita, e um "# ANEXO I"
+# indevido contem "ANEXO I". Medido: os dois casos eram descartados com o defeito intacto,
+# e como este filtro roda ANTES do meta-validador, o item descartado nunca chegava a segunda
+# instancia para ser resgatado.
+TIPOS_CHECAVEIS_POR_PRESENCA = frozenset({'omissao', 'alucinacao', 'valor_incorreto'})
+
 
 def filtra_trechos_resolvidos(trechos, texto_final):
     """Segunda checagem, sem API, sobre a reprovacao do validador.
@@ -164,12 +175,17 @@ def filtra_trechos_resolvidos(trechos, texto_final):
     no CRM-PB: reprovacao citando 'CONSIDRERANDO' -> 'CONSIDERANDO' sobrevivia no
     review_notes mesmo com 'CONSIDRERANDO' ja correto no .md salvo.
 
-    So descarta o item quando ha um termo citavel entre aspas E ele bate contra o texto
-    final. Sem aspas na descricao, nao ha como checar deterministicamente - mantem o
-    item por seguranca (falso negativo aqui e' pior que mostrar um aviso a mais).
+    So descarta o item quando (a) o TIPO admite a checagem por presenca
+    (TIPOS_CHECAVEIS_POR_PRESENCA - defeito de forma nao admite), (b) ha um termo citavel
+    entre aspas e (c) ele bate contra o texto final. Sem aspas na descricao, nao ha como
+    checar deterministicamente - mantem o item por seguranca (falso negativo aqui e' pior
+    que mostrar um aviso a mais).
     """
     resolvidos = []
     for trecho in trechos:
+        if trecho.get("tipo") not in TIPOS_CHECAVEIS_POR_PRESENCA:
+            resolvidos.append(trecho)   # defeito de forma: presenca do termo nao prova nada
+            continue
         termos = _ASPAS.findall(trecho.get("descricao", ""))
         if termos and termos[0] in texto_final:
             continue

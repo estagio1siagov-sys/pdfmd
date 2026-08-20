@@ -11,6 +11,7 @@ from converter.pipeline.portoes import (
     atos_no_documento,
     blocos_ausentes,
     conferir,
+    filtra_trechos_resolvidos,
     rebaixar_h1_extras,
 )
 
@@ -108,3 +109,43 @@ class BlocoAusenteTest(SimpleTestCase):
         md = "# RESOLUÇÃO CRM-PB nº 1/2020\n\nCONSIDERANDO x\n\nRESOLVE:\n"
         _, avisos = conferir(md)
         self.assertEqual(avisos, [])
+
+
+class FiltroDeTrechosResolvidosTest(SimpleTestCase):
+    """`filtra_trechos_resolvidos` decide se um aviso CHEGA ou NAO ao usuario, e roda
+    ANTES do meta-validador: o item que ela descarta nunca vai a segunda instancia.
+    E' a classe de codigo que mais precisa de teste."""
+
+    def test_descarta_quando_a_grafia_original_foi_restituida(self):
+        """O validador reprovou numa versao antiga; a reconversao seguinte ja corrigiu."""
+        trechos = [{"tipo": "valor_incorreto",
+                    "descricao": 'A palavra "CONSIDERENDO" do PDF virou "CONSIDERANDO" no Markdown.'}]
+        self.assertEqual(filtra_trechos_resolvidos(trechos, "**Art. 1º** CONSIDERENDO o que..."), [])
+
+    def test_mantem_quando_o_defeito_persiste(self):
+        trechos = [{"tipo": "valor_incorreto",
+                    "descricao": 'A palavra "CONSIDERENDO" do PDF virou "CONSIDERANDO" no Markdown.'}]
+        self.assertEqual(len(filtra_trechos_resolvidos(trechos, "**Art. 1º** CONSIDERANDO o que...")), 1)
+
+    def test_descarta_omissao_que_o_texto_final_ja_contem(self):
+        trechos = [{"tipo": "omissao", "descricao": 'Falta o "Parágrafo único" do Art. 3.'}]
+        self.assertEqual(filtra_trechos_resolvidos(trechos, "Parágrafo único – A verba..."), [])
+
+    def test_tabela_achatada_NAO_e_descartada_pela_presenca_do_cabecalho(self):
+        """Defeito de FORMA: a tabela achatada em texto corrido contem o proprio
+        cabecalho que a descricao cita. Presenca do termo nao prova correcao."""
+        trechos = [{"tipo": "tabela_incorreta",
+                    "descricao": 'A tabela com cabeçalho "Descrição da Despesa" não foi convertida para markdown nativo.'}]
+        md = "Descrição da Despesa Qde Vlr. Unitário Total em R$\nTOTAL .....R$\n"
+        self.assertEqual(len(filtra_trechos_resolvidos(trechos, md)), 1)
+
+    def test_hierarquia_quebrada_NAO_e_descartada_pela_presenca_do_titulo(self):
+        """Mesmo principio: "# ANEXO I" indevido contem "ANEXO I"."""
+        trechos = [{"tipo": "estrutura_incorreta",
+                    "descricao": 'O bloco "ANEXO I" está marcado como título de nível 1 (#).'}]
+        md = "# RESOLUÇÃO CRM-PB nº 172/2015\n\ntexto\n\n# ANEXO I\n"
+        self.assertEqual(len(filtra_trechos_resolvidos(trechos, md)), 1)
+
+    def test_sem_termo_entre_aspas_mantem_por_seguranca(self):
+        trechos = [{"tipo": "omissao", "descricao": "Falta um parágrafo inteiro no meio do Art. 4."}]
+        self.assertEqual(len(filtra_trechos_resolvidos(trechos, "qualquer texto")), 1)
