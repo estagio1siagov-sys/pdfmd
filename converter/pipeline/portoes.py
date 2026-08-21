@@ -262,21 +262,69 @@ def buracos_na_espinha(markdown):
 
 
 def historico_sem_marcador(markdown):
-    """Documento que DECLARA revogacao/nova redacao mas nao traz o marcador exigido.
+    """PARAGRAFO que DECLARA nova redacao mas nao tem o marcador por perto.
 
-    Duas leituras possiveis, e o aviso nao escolhe entre elas:
-      - o conversor EXCLUIU o dispositivo tachado (omissao - o caso da RN-TC 01/2017); ou
+    So cuida de "(Redacao dada pela ...)" - o caso REVOGADO tem portao proprio,
+    `revogacao_sem_tachado()`, que sobe ate o caput via ART_LINHA em vez de depender de
+    tamanho de janela. Motivo de nao reaproveitar essa funcao aqui: tentado com janela
+    fixa de paragrafos primeiro (2, depois 8) e as DUAS quebraram, em direcoes opostas -
+    janela curta nao alcancava marcador de blocos longos (caput + varios paragrafos);
+    janela larga alcancava o marcador de OUTRO dispositivo e mascarava o defeito de novo,
+    o mesmo bug que este portao existe pra pegar. Janela fixa nao sabe onde um dispositivo
+    termina e outro comeca; so subir ate o caput sabe. Redacao-dada nao tem esse problema
+    porque o padrao e' sempre curto e fixo: marcador, tachado, novo texto - 3 paragrafos.
+
+    Duas leituras possiveis por paragrafo sem marcador, e o aviso nao escolhe entre elas:
+      - o conversor EXCLUIU o dispositivo tachado (omissao); ou
       - transcreveu o texto mas nao declarou o marcador (defeito de forma).
-    Em ambos, o arquivo nao pode seguir sem olho humano.
+    Em ambos, o trecho nao pode seguir sem olho humano.
     """
-    tem_marcador = any(m in markdown for m in _MARCADORES)
-    if tem_marcador:
-        return []
+    paragrafos = markdown.split('\n\n')
     achados = []
-    if DECLARA_REVOGACAO.search(markdown):
-        achados.append('o documento declara "(... revogado pela ...)"')
-    if DECLARA_NOVA_REDACAO.search(markdown):
-        achados.append('o documento declara "(Redacao dada pela ...)"')
+    for i, p in enumerate(paragrafos):
+        if not DECLARA_NOVA_REDACAO.search(p):
+            continue
+        anteriores = paragrafos[max(0, i - 2):i]
+        janela = p + ''.join(anteriores)
+        if any(m in janela for m in _MARCADORES):
+            continue
+        trecho = p.strip().replace('\n', ' ')[:70]
+        achados.append(f'declara "(Redacao dada pela ...)" sem marcador por perto: "{trecho}..."')
+    return achados
+
+
+def revogacao_sem_tachado(markdown):
+    """CADA "(... revogado pela ...)" precisa estar em bloco tachado E com marcador.
+
+    Nao basta existir marcador NO DOCUMENTO - foi assim que a v1 deste portao passou a
+    reconversao de 21/08 com zero avisos: o arquivo trazia 4 marcadores (arts. 4o e 5o,
+    corretos) e, logo abaixo, os arts. 9o e 10 REVOGADOS transcritos como se estivessem
+    em vigor. O portao perguntava "ha algum marcador?"; a pergunta certa e "cada marca
+    tem o SEU?".
+
+    Devolve [(linha, trecho)] de cada marca de revogacao orfa de tachado/marcador.
+    """
+    linhas = markdown.split('\n')
+    achados = []
+    for i, l in enumerate(linhas):
+        if not DECLARA_REVOGACAO.search(l):
+            continue
+        # O bloco do dispositivo vai do CAPUT ate a marca. Janela de tamanho FIXO nao
+        # serve: com 14 linhas, a marca do art. 9o alcancava o marcador do art. 4o e se
+        # dava por coberta - o mesmo defeito que este portao veio corrigir, em escala
+        # menor. Sobe-se ate o caput e para-se nele.
+        j = i
+        while j > 0 and not ART_LINHA.match(linhas[j]):
+            j -= 1
+        bloco = linhas[j:i + 1]
+        tachado = any('~~' in x for x in bloco)
+        # O marcador pertence a ESTE dispositivo: tem de estar coladinho antes do caput.
+        marcado = any(mk in x for x in linhas[max(0, j - 3):j] for mk in _MARCADORES)
+        if not (tachado and marcado):
+            falta = []
+            if not tachado: falta.append('~~tachado~~')
+            if not marcado: falta.append('marcador **[DISPOSITIVO REVOGADO - ...]**')
+            achados.append((i + 1, ' e '.join(falta), l.strip()[:110]))
     return achados
 
 
@@ -301,13 +349,25 @@ def conferir(markdown):
                       "\n  - ".join(aus))
 
     # Dispositivo revogado / redacao substituida (21/08/2026)
+    orfas = revogacao_sem_tachado(corrigido)
+    if orfas:
+        det = "\n  - ".join(f"L{n}: falta {f} — \"{x}\"" for n, f, x in orfas)
+        avisos.append(
+            f"ATENCAO: {len(orfas)} dispositivo(s) declarado(s) REVOGADO(s) pelo proprio "
+            "documento, mas transcrito(s) como se estivessem EM VIGOR:\n  - " + det +
+            "\n  Revogacao SEM redacao substituta e o caso que mais escapa: nao ha par "
+            "antiga/nova para chamar a atencao, e a marca costuma vir no FIM do artigo, "
+            "depois do ultimo paragrafo — mas ela diz 'ARTIGO revogado', e alcanca o caput "
+            "e todos os paragrafos. Marcar o artigo INTEIRO."
+        )
     hist = historico_sem_marcador(corrigido)
     if hist:
         avisos.append(
-            "ATENCAO: " + " e ".join(hist) + ", mas NAO ha marcador "
-            "**[DISPOSITIVO REVOGADO - ...]** nem **[REDACAO ANTERIOR - ...]** no arquivo. "
-            "Ou o trecho tachado foi EXCLUIDO (omissao - foi o que aconteceu com os arts. 9o e "
-            "10 da RN-TC 01/2017), ou foi transcrito sem declarar. Conferir contra o PDF."
+            f"ATENCAO: {len(hist)} trecho(s) do documento declaram revogacao/nova redacao "
+            "sem o marcador **[DISPOSITIVO REVOGADO - ...]** ou **[REDACAO ANTERIOR - ...]** "
+            "por perto. Ou o trecho tachado foi EXCLUIDO (omissao - foi o que aconteceu com "
+            "os arts. 9o e 10 da RN-TC 01/2017), ou foi transcrito sem declarar. Conferir "
+            "contra o PDF:\n  - " + "\n  - ".join(hist)
         )
     furos = buracos_na_espinha(corrigido)
     if furos:

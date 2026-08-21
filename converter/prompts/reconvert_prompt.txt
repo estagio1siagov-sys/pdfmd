@@ -10,4 +10,6 @@ IMPORTANTE: antes de corrigir, avalie se o "problema" apontado envolve rubrica (
 
 Se o problema apontado for OMISSÃO DE DISPOSITIVO REVOGADO ou de REDAÇÃO ANTERIOR (texto tachado no PDF, ou trecho seguido de "(Artigo revogado pela ...)" / "(Redação dada pela ...)"), a correção é TRANSCREVER o trecho que faltava, entre ~~til duplo~~ e precedido da linha **[DISPOSITIVO REVOGADO — ...]** ou **[REDAÇÃO ANTERIOR — ...]**, conforme a regra do prompt de conversão. Não exclua o dispositivo para "resolver" a repetição: num texto compilado o mesmo artigo aparece duas vezes de propósito, e as duas redações têm de estar no Markdown.
 
+Se o problema apontado for TACHADO PARCIAL (só a última frase do bloco revogado saiu em ~~tachado~~, mas o PDF risca o caput e os parágrafos anteriores do MESMO artigo também), a correção é estender o ~~tachado~~ pra cobrir o bloco INTEIRO riscado no PDF — caput e todos os parágrafos —, com UM único marcador **[DISPOSITIVO REVOGADO — ...]** antes do início do bloco, não um por frase. Confira no PDF até onde o risco visual realmente vai antes de decidir onde o `~~` começa.
+
 Gere a transcrição corrigida do zero, completa (todas as páginas do bloco), no mesmo formato. Não inclua comentários sobre a correção — apenas o Markdown corrigido.

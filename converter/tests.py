@@ -16,6 +16,7 @@ from converter.pipeline.portoes import (
     espinha_de_artigos,
     buracos_na_espinha,
     historico_sem_marcador,
+    revogacao_sem_tachado,
 )
 
 
@@ -174,6 +175,9 @@ class DispositivoRevogadoTest(SimpleTestCase):
 
     RNTC_COMO_DEVE_SAIR = (
         "# RESOLUCAO NORMATIVA RN-TC No 01/2017\n\n"
+        "**[REDACAO ANTERIOR - art. 8o, substituida pela RN-TC no 01/2025]**\n\n"
+        "~~**Art. 8o.** Todos os achados de auditoria durante o acompanhamento da Gestao "
+        "deverao ser juntados aos autos eletronicos do respectivo processo.~~\n\n"
         "**Art. 8o.** Os autos eletronicos do Processo de Acompanhamento da Gestao deverao "
         "ser juntados ao respectivo Processo de Prestacao de Contas Anual. "
         "(Redacao dada pela Resolucao Normativa TC no 01/2025)\n\n"
@@ -225,6 +229,33 @@ class DispositivoRevogadoTest(SimpleTestCase):
         self.assertEqual(corrigido, portaria)          # NAO tocou no documento
         self.assertIn("NAO E PROVA DE OMISSAO", "\n".join(avisos))
 
+    def test_marcador_correto_num_dispositivo_nao_esconde_falta_em_outro(self):
+        """Bug real medido: art. 5o saiu com **[REDACAO ANTERIOR...]** certinho, mas os
+        arts. 9o/10 (revogados, SEM substituto - sem o par contrastante que parece ajudar
+        o modelo a aplicar a regra) sairam so com "(Artigo revogado pela ...)" no fim da
+        frase, sem tachado nem marcador algum. A checagem antiga era global no documento
+        (`any(marcador in markdown)`): o marcador do art. 5o fazia o portao dar o
+        documento INTEIRO por resolvido, escondendo os arts. 9o/10 sem marcador."""
+        md = (
+            "# RESOLUCAO NORMATIVA RN-TC No 01/2017\n\n"
+            "**[REDACAO ANTERIOR - art. 5o, substituida pela RN-TC no 06/2020]**\n\n"
+            "~~**Art. 5o.** Sem prejuizo da instauracao de processos de Tomadas de Contas "
+            "Especial, da instrucao do processo de acompanhamento decorrera a/o:~~\n\n"
+            "**Art. 5o.** Do acompanhamento da gestao estadual e municipal decorrera a/o: "
+            "(Redacao dada pela Resolucao Normativa TC no 06/2020)\n\n"
+            "**Art. 9o.** Apos o processamento do balancete, sera elaborado o Relatorio "
+            "Previo. (Artigo revogado pela Resolucao Normativa TC no 06/2020)\n\n"
+            "**Art. 10.** O Gestor devera esclarecer as irregularidades remanescentes. "
+            "(Artigo revogado pela Resolucao Normativa TC no 06/2020)\n"
+        )
+        # Revogacao (arts. 9o/10) e' responsabilidade de revogacao_sem_tachado(), nao mais
+        # de historico_sem_marcador() - ver o comentario dessa funcao no portoes.py sobre
+        # janela fixa ter quebrado nos dois tamanhos tentados.
+        achados = revogacao_sem_tachado(md)
+        self.assertEqual(len(achados), 2)  # os DOIS artigos sem marcador, nao mascarados
+        self.assertTrue(any("balancete" in a[2] for a in achados))
+        self.assertTrue(any("Gestor" in a[2] for a in achados))
+
     def test_citacao_de_artigo_de_outra_norma_nao_entra_na_espinha(self):
         """Art. 14 da RN-TC 01/2017 transcreve o art. 10 da RN-TC 03/2014."""
         md = (
@@ -238,3 +269,68 @@ class DispositivoRevogadoTest(SimpleTestCase):
         )
         self.assertNotIn(10, espinha_de_artigos(md))
         self.assertEqual(espinha_de_artigos(md), [13, 14, 15])
+
+
+class RevogadoSemSubstitutoTest(SimpleTestCase):
+    """CASO B - revogacao SEM redacao substituta. O que mais escapa.
+
+    Medido na reconversao de 21/08/2026 da RN-TC 01/2017, JA COM O PATCH APLICADO: o
+    conversor acertou os arts. 4o e 5o (caso A, que tem par antiga/nova) e transcreveu os
+    arts. 9o e 10 (caso B) com texto NORMAL - sem tachado, sem marcador - como se
+    estivessem em vigor. A v1 do portao passou o arquivo com ZERO avisos, porque
+    perguntava "ha ALGUM marcador no documento?" e havia (os dos arts. 4o e 5o).
+    A pergunta certa e "CADA marca tem o SEU marcador?".
+    """
+
+    # exatamente o padrao que veio na reconversao: marcador correto em cima, defeito embaixo
+    V3_COMO_VEIO = (
+        "# RESOLUCAO NORMATIVA RN-TC No 01/2017\n\n"
+        "**[REDACAO ANTERIOR - art. 4o, substituida pela RN-TC no 06/2020]**\n\n"
+        "~~**Art. 4o.** Ato da Presidencia do Tribunal definira os procedimentos.~~\n\n"
+        "**Art. 4o.** Ato do Presidente do Tribunal aprovara os procedimentos. "
+        "(Redacao dada pela Resolucao Normativa TC no 06/2020)\n\n"
+        "**Art. 9o.** Apos o processamento do balancete relativo a dezembro de cada "
+        "exercicio, sera elaborado o Relatorio Previo sobre a Gestao do Poder ou Orgao.\n\n"
+        "**§ 1o.** No ambito do Poder Executivo estadual, deverao ser gerados Relatorios.\n\n"
+        "**§ 2o.** No ambito do Poder Executivo municipal, deverao ser gerados Relatorios "
+        "quando preenchidos os criterios. (Artigo revogado pela Resolucao Normativa TC no "
+        "06/2020, publicada no Diario Oficial Eletronico do TCE/PB, de 22 de dezembro de 2020)\n"
+    )
+
+    V3_COMO_DEVE_SAIR = (
+        "# RESOLUCAO NORMATIVA RN-TC No 01/2017\n\n"
+        "**[REDACAO ANTERIOR - art. 4o, substituida pela RN-TC no 06/2020]**\n\n"
+        "~~**Art. 4o.** Ato da Presidencia do Tribunal definira os procedimentos.~~\n\n"
+        "**Art. 4o.** Ato do Presidente do Tribunal aprovara os procedimentos. "
+        "(Redacao dada pela Resolucao Normativa TC no 06/2020)\n\n"
+        "**[DISPOSITIVO REVOGADO - art. 9o, pela RN-TC no 06/2020, DOE-TCE/PB 22/12/2020]**\n\n"
+        "~~**Art. 9o.** Apos o processamento do balancete relativo a dezembro de cada "
+        "exercicio, sera elaborado o Relatorio Previo sobre a Gestao do Poder ou Orgao.~~\n\n"
+        "~~**§ 1o.** No ambito do Poder Executivo estadual, deverao ser gerados Relatorios.~~\n\n"
+        "~~**§ 2o.** No ambito do Poder Executivo municipal, deverao ser gerados Relatorios "
+        "quando preenchidos os criterios.~~ (Artigo revogado pela Resolucao Normativa TC no "
+        "06/2020, publicada no Diario Oficial Eletronico do TCE/PB, de 22 de dezembro de 2020)\n"
+    )
+
+    def test_marcador_de_OUTRO_artigo_nao_absolve_o_defeituoso(self):
+        """A REGRESSAO que motivou este portao: havia marcador, e o defeito passou."""
+        self.assertEqual(historico_sem_marcador(self.V3_COMO_VEIO), [])   # v1 nao via nada
+        self.assertTrue(revogacao_sem_tachado(self.V3_COMO_VEIO))          # v2 ve
+
+    def test_conferir_agora_reprova_o_arquivo_que_passou(self):
+        _, avisos = conferir(self.V3_COMO_VEIO)
+        texto = "\n".join(avisos)
+        self.assertIn("transcrito(s) como se estivessem EM VIGOR", texto)
+
+    def test_transcricao_correta_do_caso_B_nao_gera_aviso(self):
+        _, avisos = conferir(self.V3_COMO_DEVE_SAIR)
+        self.assertEqual(revogacao_sem_tachado(self.V3_COMO_DEVE_SAIR), [])
+        self.assertNotIn("EM VIGOR", "\n".join(avisos))
+
+    def test_marca_no_fim_do_artigo_alcanca_o_caput_acima(self):
+        """A marca vem colada ao ultimo paragrafo; a janela tem de subir ate o caput."""
+        orfas = revogacao_sem_tachado(self.V3_COMO_VEIO)
+        self.assertEqual(len(orfas), 1)
+        linha, falta, _ = orfas[0]
+        self.assertIn("~~tachado~~", falta)
+        self.assertIn("DISPOSITIVO REVOGADO", falta)
