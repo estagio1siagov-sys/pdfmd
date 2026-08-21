@@ -5,6 +5,7 @@ from pathlib import Path
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.views.decorators.http import require_POST
 
 from .forms import PdfUploadForm
 from .models import ConversionJob
@@ -42,8 +43,14 @@ def queue_view(request):
     return render(request, "converter/queue.html", {"jobs": jobs})
 
 
+# POST obrigatório: esta view APAGA os jobs e os arquivos depois de montar o ZIP. Como GET,
+# ela era destrutiva e sem proteção de CSRF por definição — um prefetch do navegador, um
+# scanner de link ou um `<img src=".../download-all/?ids=1,2,3">` numa página de terceiro
+# apagava a conversão de quem estivesse com a fila aberta. Os ids são inteiros sequenciais,
+# então adivinhá-los é trivial.
+@require_POST
 def download_all(request):
-    ids_param = request.GET.get("ids", "")
+    ids_param = request.POST.get("ids", "")
     job_ids = [int(i) for i in ids_param.split(",") if i.strip().isdigit()]
     jobs = ConversionJob.objects.filter(
         pk__in=job_ids, status=ConversionJob.STATUS_DONE
@@ -104,6 +111,24 @@ def download_all(request):
     return response
 
 
+# runner.py e queue_worker.py gravam o traceback completo em `error_message` quando a falha
+# não é uma das esperadas. Isso é útil no banco/admin, mas este endpoint é público e o
+# job_id é adivinhável — devolver o traceback expõe caminhos do servidor, trechos de código
+# e o corpo de erro cru da API do Gemini. O texto técnico fica no banco; o usuário recebe
+# uma mensagem que dá pra agir em cima.
+PREFIXO_ERRO_INESPERADO = "Erro inesperado"
+MSG_ERRO_INESPERADO = (
+    "Erro inesperado no processamento deste arquivo. Tente enviar de novo; "
+    "se continuar falhando, avise o responsável pelo sistema."
+)
+
+
+def _mensagem_de_erro_para_usuario(job):
+    if job.error_message.startswith(PREFIXO_ERRO_INESPERADO):
+        return MSG_ERRO_INESPERADO
+    return job.error_message
+
+
 def progress_status(request, job_id):
     job = get_object_or_404(ConversionJob, pk=job_id)
 
@@ -137,7 +162,7 @@ def progress_status(request, job_id):
         "current_block": job.current_block,
         "total_blocks": job.total_blocks,
         "progress_percent": job.progress_percent(),
-        "error_message": job.error_message,
+        "error_message": _mensagem_de_erro_para_usuario(job),
         "result_url": job.result_file.url if job.result_file else None,
         "filename": job.original_filename,
         "needs_review": job.needs_review,

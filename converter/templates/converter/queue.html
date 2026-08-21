@@ -117,15 +117,33 @@
 <script>
   const jobIds = [{% for job in jobs %}{{ job.pk }}{% if not forloop.last %},{% endif %}{% endfor %}];
   const statusUrlBase = "/job/";
-  const downloadAllUrl = "{% url 'converter:download_all' %}?ids=" + jobIds.join(',');
+  const downloadAllUrl = "{% url 'converter:download_all' %}";
+  const csrfToken = "{{ csrf_token }}";
 
   const badgeText = { queued: 'na fila', running: 'processando', done: 'concluído', failed: 'falhou' };
   const doneJobs = new Set();
 
   const downloadAllBar = document.getElementById('download-all-bar');
   const downloadAllCount = document.getElementById('download-all-count');
+  // Submete um form POST em vez de navegar por GET: a view apaga os jobs e os arquivos
+  // depois de montar o ZIP, e uma rota destrutiva por GET pode ser disparada por prefetch
+  // do navegador ou por uma página de terceiro. O form é montado e enviado na hora para
+  // que o download continue sendo uma navegação normal (o navegador salva o arquivo).
   document.getElementById('download-all-btn').addEventListener('click', () => {
-    window.location.href = downloadAllUrl;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = downloadAllUrl;
+    form.style.display = 'none';
+    const campos = { ids: jobIds.join(','), csrfmiddlewaretoken: csrfToken };
+    for (const [nome, valor] of Object.entries(campos)) {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = nome;
+      input.value = valor;
+      form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
   });
 
   function updateDownloadAllBar() {
@@ -174,9 +192,15 @@
         return;
       }
 
-      setTimeout(() => pollJob(jobId), 1500);
+      // Cada job tem o seu próprio laço de polling, então N arquivos enviados de uma vez
+      // viram N requisições por ciclo. Com 10 arquivos a 1,5s fixos dava ~6,7 req/s
+      // constantes contra o SQLite, competindo com as gravações de progresso dos 3 workers.
+      // Job 'queued' não muda de estado por conta própria — só quando um worker o pega —
+      // então ele pode esperar bem mais. O jitter evita que todos os cards batam juntos.
+      const base = data.status === 'queued' ? 6000 : 1500;
+      setTimeout(() => pollJob(jobId), base + Math.random() * 500);
     } catch (e) {
-      setTimeout(() => pollJob(jobId), 3000);
+      setTimeout(() => pollJob(jobId), 3000 + Math.random() * 1000);
     }
   }
 

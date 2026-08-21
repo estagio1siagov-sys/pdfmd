@@ -80,6 +80,15 @@ RATE_LIMIT_WAIT_START = 30
 RATE_LIMIT_WAIT_INCREMENT = 30
 
 
+_client_default = None
+
+# queue_worker.NUM_WORKERS = 3, ou seja, tres threads podem entrar nestes getters ao
+# mesmo tempo. Sem o lock, duas delas passam juntas pelo teste `is None` e cada uma
+# instancia o seu proprio genai.Client — a segunda sobrescreve a primeira. Nao corrompe
+# estado, mas cria cliente descartado e conexoes a mais sem necessidade.
+_clients_lock = threading.Lock()
+
+
 def _make_client(api_key, name):
     if not api_key:
         raise RuntimeError(f"{name} não configurada. Defina no arquivo .env.")
@@ -88,40 +97,42 @@ def _make_client(api_key, name):
 
 def get_client_converter():
     global _client_converter
-    if _client_converter is None:
-        _client_converter = _make_client(settings.GEMINI_API_KEY_CONVERTER, "GEMINI_API_KEY_CONVERTER")
-    return _client_converter
+    with _clients_lock:
+        if _client_converter is None:
+            _client_converter = _make_client(settings.GEMINI_API_KEY_CONVERTER, "GEMINI_API_KEY_CONVERTER")
+        return _client_converter
 
 
 def get_client_validator():
     global _client_validator
-    if _client_validator is None:
-        _client_validator = _make_client(settings.GEMINI_API_KEY_VALIDATOR, "GEMINI_API_KEY_VALIDATOR")
-    return _client_validator
+    with _clients_lock:
+        if _client_validator is None:
+            _client_validator = _make_client(settings.GEMINI_API_KEY_VALIDATOR, "GEMINI_API_KEY_VALIDATOR")
+        return _client_validator
 
 
 def get_client_reconverter():
     global _client_reconverter
-    if _client_reconverter is None:
-        _client_reconverter = _make_client(settings.GEMINI_API_KEY_RECONVERTER, "GEMINI_API_KEY_RECONVERTER")
-    return _client_reconverter
-
-
-_client_default = None
+    with _clients_lock:
+        if _client_reconverter is None:
+            _client_reconverter = _make_client(settings.GEMINI_API_KEY_RECONVERTER, "GEMINI_API_KEY_RECONVERTER")
+        return _client_reconverter
 
 
 def get_client_default():
     global _client_default
-    if _client_default is None:
-        _client_default = _make_client(settings.GEMINI_API_KEY, "GEMINI_API_KEY")
-    return _client_default
+    with _clients_lock:
+        if _client_default is None:
+            _client_default = _make_client(settings.GEMINI_API_KEY, "GEMINI_API_KEY")
+        return _client_default
 
 
 def get_client_meta():
     global _client_meta
-    if _client_meta is None:
-        _client_meta = _make_client(settings.GEMINI_API_KEY_META, "GEMINI_API_KEY_META")
-    return _client_meta
+    with _clients_lock:
+        if _client_meta is None:
+            _client_meta = _make_client(settings.GEMINI_API_KEY_META, "GEMINI_API_KEY_META")
+        return _client_meta
 
 
 def _should_fallback_to_default(exc, primary_key):
@@ -137,8 +148,45 @@ def _should_fallback_to_default(exc, primary_key):
     return bool(default_key) and default_key != primary_key
 
 
+# Teto de saida do gemini-3.1-flash-lite, consultado na propria API
+# (`client.models.get(...).output_token_limit` = 65536). Sem passar isso
+# explicitamente, a chamada usa um default MENOR que o teto do modelo, e a
+# transcricao de um bloco denso estoura esse default e volta com
+# finish_reason=MAX_TOKENS — cortada no meio da frase. Era a origem real do
+# truncamento; o guard abaixo so remediava o sintoma, gastando quota.
+MAX_OUTPUT_TOKENS = 65536
+
 TRUNCATION_MAX_ATTEMPTS = 3
+# Teto separado para o caso MAX_TOKENS: reenviar o MESMO input reproduz o mesmo
+# corte com altissima probabilidade, entao insistir 3x e' queima de quota pura.
+# Uma reexecucao vale como seguro contra nao-determinismo do modelo; alem disso, nao.
+# Resposta VAZIA e' outra coisa (hiccup transitorio/safety) e mantem as 3 tentativas.
+TRUNCATION_MAX_TOKENS_ATTEMPTS = 2
 TRUNCATION_WAIT_SECONDS = 3
+
+# Teto duro de chamadas REAIS a API por etapa (converter/reconverter um bloco).
+# O guard de truncamento fica dentro do @_rate_limit_retry, entao as contagens se
+# multiplicam: medido com contador, resposta vazia + 429 alternados dao 5 tentativas
+# do tenacity x 3 do guard = 15 chamadas reais debitadas da cota numa etapa so.
+# O budget e' criado UMA vez por etapa e sobrevive as retentativas do tenacity, entao
+# funciona como teto global da etapa, nao por tentativa. Esgotar nao levanta excecao:
+# o guard para de chamar e devolve o melhor texto que tiver, e quem chama decide
+# (converter levanta BlockedByPolicyError se veio vazio; reconverter mantem a versao
+# anterior). 6 deixa folga para o caso legitimo (3 do guard + retentativa de 429).
+CALL_BUDGET_PER_STEP = 6
+
+
+class _CallBudget:
+    def __init__(self, limit):
+        self._left = limit
+        self._lock = threading.Lock()
+
+    def try_consume(self):
+        with self._lock:
+            if self._left <= 0:
+                return False
+            self._left -= 1
+            return True
 
 
 def _is_truncated(response):
@@ -155,21 +203,34 @@ def _is_truncated(response):
         return False
 
 
-def _call_with_truncation_guard(generate_fn):
+def _call_with_truncation_guard(generate_fn, budget=None):
     """Reexecuta até TRUNCATION_MAX_ATTEMPTS vezes quando a resposta vem vazia ou
     cortada (MAX_TOKENS) — medido: sob instabilidade/rate-limit na nuvem, o Gemini
     às vezes devolve texto interrompido no meio da frase (ex.: reconversão do 167_2014
     terminando em "Em" sem a data), e isso passava direto pro arquivo final sem
     nenhuma tentativa nova. Sempre devolve o MELHOR texto obtido — se ainda estiver
     cortado depois de todas as tentativas, aceita como está (nunca lança exceção por
-    isso, quem chama decide o que fazer com um resultado ainda vazio)."""
+    isso, quem chama decide o que fazer com um resultado ainda vazio).
+
+    ATENÇÃO ao custo: este laço fica DENTRO do `@_rate_limit_retry`, então as duas
+    contagens se multiplicam — medido com contador real, 5 tentativas do tenacity ×
+    3 deste guard = 15 chamadas de verdade à API numa única conversão de bloco, todas
+    debitadas da cota. Por isso o caso MAX_TOKENS tem teto próprio e menor
+    (`TRUNCATION_MAX_TOKENS_ATTEMPTS`): com `MAX_OUTPUT_TOKENS` explícito ele deixa de
+    acontecer na origem, e quando acontece reenviar o mesmo input não conserta."""
     text = ""
-    for attempt in range(TRUNCATION_MAX_ATTEMPTS):
+    response = None
+    for attempt in range(1, TRUNCATION_MAX_ATTEMPTS + 1):
+        if budget is not None and not budget.try_consume():
+            break
         response = generate_fn()
         text = (response.text or "").strip()
         if text and not _is_truncated(response):
             return text, response
-        if attempt < TRUNCATION_MAX_ATTEMPTS - 1:
+        veio_cortada = bool(text) and _is_truncated(response)
+        if veio_cortada and attempt >= TRUNCATION_MAX_TOKENS_ATTEMPTS:
+            break
+        if attempt < TRUNCATION_MAX_ATTEMPTS:
             time.sleep(TRUNCATION_WAIT_SECONDS)
     return text, response
 
@@ -237,27 +298,39 @@ def convert_block_to_markdown(pdf_bytes, on_retry=None):
     é chamado antes de cada nova tentativa, útil para atualizar a UI.
     """
 
-    def _generate(client):
+    def _generate(client, bucket, budget):
         def _do_call():
+            # Adquire o bucket a CADA chamada real, nao so na primeira - o guard de
+            # truncamento (`_call_with_truncation_guard`) pode chamar isto ate 3x por
+            # dentro quando a resposta vem cortada, e cada uma delas e' uma requisicao
+            # de verdade pro Gemini. Sem isto, so a 1a tentativa passava pelo bucket;
+            # as reexecucoes do guard saiam sem o espacamento de 5s, sem o bucket saber
+            # que aconteceram - o Google contava as 3 pro RPM real, nos so contavamos 1.
+            bucket.acquire()
             return client.models.generate_content(
                 model=settings.GEMINI_MODEL,
                 contents=[
                     types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
                     CONVERTER_PROMPT,
                 ],
+                config=types.GenerateContentConfig(max_output_tokens=MAX_OUTPUT_TOKENS),
             )
 
-        text, response = _call_with_truncation_guard(_do_call)
+        text, response = _call_with_truncation_guard(_do_call, budget)
         if not text:
             reason = _blocked_reason(response)
             raise BlockedByPolicyError(reason)
         return text
 
+    # Criados FORA das funcoes decoradas: o tenacity reexecuta `_call_primary` inteiro,
+    # entao um budget criado la dentro seria zerado a cada retentativa e o teto nao valeria.
+    budget_primary = _CallBudget(CALL_BUDGET_PER_STEP)
+    budget_fallback = _CallBudget(CALL_BUDGET_PER_STEP)
+
     @_rate_limit_retry(on_retry)
     def _call_primary():
         _init_buckets()
-        _bucket_converter.acquire()
-        return _generate(get_client_converter())
+        return _generate(get_client_converter(), _bucket_converter, budget_primary)
 
     try:
         return _call_primary()
@@ -267,8 +340,9 @@ def convert_block_to_markdown(pdf_bytes, on_retry=None):
 
         @_rate_limit_retry(on_retry)
         def _call_fallback():
-            _get_or_create_bucket(settings.GEMINI_API_KEY).acquire()
-            return _generate(get_client_default())
+            return _generate(
+                get_client_default(), _get_or_create_bucket(settings.GEMINI_API_KEY), budget_fallback,
+            )
 
         return _call_fallback()
 
@@ -290,27 +364,36 @@ def reconvert_block_with_feedback(pdf_bytes, previous_markdown, issues_text, on_
             .replace("{previous_markdown}", previous_markdown)
     )
 
-    def _generate(client):
+    def _generate(client, bucket, budget):
         def _do_call():
+            # Ver o mesmo comentário em convert_block_to_markdown: adquire o bucket a
+            # cada chamada real, não só na primeira, porque o guard de truncamento pode
+            # reexecutar até 3x por dentro.
+            bucket.acquire()
             return client.models.generate_content(
                 model=settings.GEMINI_MODEL,
                 contents=[
                     types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf"),
                     prompt,
                 ],
+                config=types.GenerateContentConfig(max_output_tokens=MAX_OUTPUT_TOKENS),
             )
 
-        text, _response = _call_with_truncation_guard(_do_call)
+        text, _response = _call_with_truncation_guard(_do_call, budget)
         # Vazio mesmo após as tentativas do guard: não há nada melhor que a reconversão
         # possa oferecer aqui. Mantém a versão anterior (imperfeita, mas íntegra) em vez
         # de substituir por texto vazio/cortado — nunca piora o que já existia.
         return text or previous_markdown
 
+    # Ver comentário em convert_block_to_markdown: fora das funções decoradas, senão o
+    # tenacity zera o teto a cada retentativa.
+    budget_primary = _CallBudget(CALL_BUDGET_PER_STEP)
+    budget_fallback = _CallBudget(CALL_BUDGET_PER_STEP)
+
     @_rate_limit_retry(on_retry)
     def _call_primary():
         _init_buckets()
-        _bucket_reconverter.acquire()
-        return _generate(get_client_reconverter())
+        return _generate(get_client_reconverter(), _bucket_reconverter, budget_primary)
 
     try:
         return _call_primary()
@@ -320,8 +403,9 @@ def reconvert_block_with_feedback(pdf_bytes, previous_markdown, issues_text, on_
 
         @_rate_limit_retry(on_retry)
         def _call_fallback():
-            _get_or_create_bucket(settings.GEMINI_API_KEY).acquire()
-            return _generate(get_client_default())
+            return _generate(
+                get_client_default(), _get_or_create_bucket(settings.GEMINI_API_KEY), budget_fallback,
+            )
 
         return _call_fallback()
 
@@ -384,6 +468,7 @@ def validate_block(pdf_bytes, markdown_text, on_retry=None):
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=VALIDATION_SCHEMA,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
             ),
         )
         raw = response.text
@@ -467,6 +552,7 @@ def recheck_flagged_issues(pdf_bytes, final_markdown, trechos, on_retry=None):
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=META_RECHECK_SCHEMA,
+                max_output_tokens=MAX_OUTPUT_TOKENS,
             ),
         )
         raw = response.text

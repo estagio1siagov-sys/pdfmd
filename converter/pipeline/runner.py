@@ -64,6 +64,12 @@ def run_pipeline(job):
 
         converted_markdowns = []
         flagged_blocks = []
+        # Conta só os blocos que produziram texto de verdade. `converted_markdowns` não
+        # serve para isso desde que o bloco bloqueado passou a gravar um marcador de página
+        # ausente nela (ver o `continue` abaixo): a lista nunca mais fica vazia, então o
+        # teste `if not converted_markdowns` virou código morto e o caso "todo o PDF foi
+        # bloqueado" terminava DONE, entregando um .md que só contém marcadores de buraco.
+        blocos_convertidos = 0
 
         for index, block in enumerate(blocks, start=1):
             pages_label = f"páginas {block['start_page']}-{block['end_page']}"
@@ -204,8 +210,9 @@ def run_pipeline(job):
                     })
 
             converted_markdowns.append(validated_markdown)
+            blocos_convertidos += 1
 
-        if not converted_markdowns:
+        if not blocos_convertidos:
             blocked = [fb for fb in flagged_blocks if fb.get("blocked_by_policy")]
             pages = ", ".join(fb["pages_label"] for fb in blocked)
             raise ValueError(

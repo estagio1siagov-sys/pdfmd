@@ -15,7 +15,14 @@ ESPECIE = (r'(RESOLU[ÇC][ÃA]O|PORTARIA|DELIBERA[ÇC][ÃA]O|INSTRU[ÇC][ÃA]O\s
 # Duas grafias reais do CRM-PB, medidas no lote de 18/08:
 #   "RESOLUCAO CRM-PB no 165/2014"                        -> numero/ano
 #   "RESOLUCAO CRM-PB N.o 168, DE 1o DE DEZEMBRO DE 2014" -> numero, data por extenso
-_NUM = r'[^\n]{0,40}?n?[º°o.]*\s*(\d{1,5})\s*(?:[/.-]\s*(\d{4})|,\s*DE\s+[^\n]{4,40}?\s+DE\s+(\d{4}))'
+# O numero aceita separador de milhar ("RESOLUCAO CFM No 1.931/2009"): sem isso o prefixo
+# preguicoso reengatava depois do ponto e o ato virava "931/2009" no aviso ao usuario.
+_NUM = (r'[^\n]{0,40}?n?[º°o.]*\s*(\d{1,3}(?:\.\d{3})+|\d{1,5})\s*'
+        r'(?:[/.-]\s*(\d{4})|,\s*DE\s+[^\n]{4,40}?\s+DE\s+(\d{4}))')
+
+# Devolvido por rebaixar_h1_extras quando ele decide NAO mexer na hierarquia. Marca o
+# aviso para conferir() nao o exibir sob o cabecalho de "ajustada automaticamente".
+AVISO_NAO_ALTERADA = "hierarquia NAO alterada"
 ATO_INLINE = re.compile(ESPECIE + _NUM, re.I)
 ATO_ABERTURA = re.compile(r'^\s*#*\s*\**\s*' + ESPECIE + _NUM, re.I)
 # Anexo/apendice CITA a norma-mae; nao abre ato. Sem isto, o 163_2014 promovia
@@ -32,23 +39,50 @@ MARCA_BLOCO_AUSENTE = "<!-- SINGRA:BLOCO-AUSENTE"
 # para nao repetir texto - e criava omissao silenciosa. Medido na RN-TC 01/2017 do TCE-PB:
 # os arts. 9o e 10, revogados pela RN-TC 06/2020 e PRESERVADOS no PDF com a marca, sumiram
 # do .md; o documento saltava do art. 8o para o art. 11 e passou por DUAS conversoes assim.
-MARCA_REVOGADO = "**[DISPOSITIVO REVOGADO"
-MARCA_REDACAO_ANTERIOR = "**[REDACAO ANTERIOR"
-# aceita com e sem acento - o marcador e escrito por LLM
-_MARCADORES = (MARCA_REVOGADO, MARCA_REDACAO_ANTERIOR, "**[REDAÇÃO ANTERIOR")
+# Formato canonico dos marcadores, emitido pelos prompts:
+#   **[DISPOSITIVO REVOGADO — art. 9o, pela RN-TC no 06/2020]**
+#   **[REDACAO ANTERIOR — art. 4o, substituida pela RN-TC no 06/2020]**
+# A deteccao mora so em _MARCADOR_RE, abaixo: manter tambem constantes de string soltas
+# criava duas definicoes concorrentes de "como e o marcador", que e por onde a divergencia
+# comeca (foi assim que a comparacao case-sensitive sobreviveu).
+# Marcador escrito por LLM: varia em acento e em caixa ("**[Dispositivo revogado ...]**"
+# aparece tanto quanto a forma toda em maiuscula). Comparacao literal com `in` era
+# sensivel a caixa e dava falso positivo em documento corretamente marcado.
+_MARCADOR_RE = re.compile(r'\*\*\[\s*(?:DISPOSITIVO\s+REVOGAD[OA]|REDA[ÇCçc][ÃAãa]O\s+ANTERIOR)', re.I)
+# Para "(Redacao dada pela ...)" so vale o marcador de REDACAO ANTERIOR: aceitar tambem o
+# de DISPOSITIVO REVOGADO fazia o marcador do artigo de cima absolver o de baixo.
+_MARCADOR_REDACAO_RE = re.compile(r'\*\*\[\s*REDA[ÇCçc][ÃAãa]O\s+ANTERIOR', re.I)
+
+
+def _tem_marcador(texto, regex=_MARCADOR_RE):
+    return bool(regex.search(texto))
+
 
 # O proprio documento declara, colado ao dispositivo. Sobrevive ao pdftotext: nao depende
 # de enxergar o tachado.
-DECLARA_REVOGACAO = re.compile(r'\(\s*(?:Artigo|Paragrafo|Par[áa]grafo|Inciso|Al[íi]nea|Item)?\s*revogad[oa]s?\s+pel[ao]', re.I)
+# O sujeito pode vir QUALIFICADO - "(Inciso II revogado pela ...)", "(Paragrafo unico
+# revogado pela ...)", "(Artigo 9o revogado pela ...)" - que e a forma mais comum em texto
+# compilado brasileiro. So aceitar o substantivo nu deixava todas essas passarem batidas.
+DECLARA_REVOGACAO = re.compile(
+    r'\(\s*(?:(?:Artigo|Paragrafo|Par[áa]grafo|Inciso|Al[íi]nea|Item)'
+    r'\s*(?:[^\n)]{0,24}?\s+)?)?revogad[oa]s?\s+pel[ao]', re.I)
 DECLARA_NOVA_REDACAO = re.compile(r'\(\s*Reda[çc][ãa]o\s+dada\s+pel[ao]', re.I)
 
 # Artigo no inicio da linha, tolerando ~~tachado~~ e **negrito**.
 # O terminador e' LOOKAHEAD e inclui '**': "**Art. 10** - texto" e a forma mais comum de
 # artigo em markdown, e um terminador que so aceitasse [ºo°.-] a perderia em silencio -
 # apanhado pelo test_salto_legitimo_do_orgao ao escrever a propria peca.
-ART_LINHA = re.compile(r'^\s*~{0,2}\s*\**\s*Art(?:igo)?\.?\s*(\d{1,3})\s*(?=[ºo°.,\-–)]|\*\*|\s|$)', re.I)
+# O prefixo tolera tambem '#' (artigo emitido como heading) e marcador de lista: sem isso,
+# um documento com "### Art. 1o" nao produzia espinha NENHUMA, e buracos_na_espinha devolvia
+# [] - passando como se estivesse integro em vez de avisar.
+ART_LINHA = re.compile(
+    r'^\s*#{0,6}\s*[->]?\s*~{0,2}\s*\**\s*Art(?:igo)?\.?\s*(\d{1,3})\s*'
+    r'(?=[ºo°.,\-–)]|\*\*|\s|$)', re.I)
 # Lixo de marcacao entre o numero e o texto ("**", "º.", "~~") - limpo antes de testar citacao.
-_SOBRA_MARCACAO = re.compile(r'\A\s*(?:[ºo°.,\-–)]|\*\*|~~)+')
+# Precisa aceitar ESPACO no meio da sequencia: em "**Art. 10** - da Resolucao X" o resto e
+# "** - da Resolucao X", e uma corrida sem espaco parava no "**", CITA_OUTRA_NORMA nao casava
+# e a citacao entrava na espinha, fabricando buraco em documento correto.
+_SOBRA_MARCACAO = re.compile(r'\A(?:\s|[ºo°.,\-–)]|\*\*|~~)+')
 # v1.6.2 do conferente: candidato seguido de PREPOSICAO + especie normativa e CITACAO de
 # outra norma, nao artigo proprio. Sem isto, "Art. 10 da Resolucao ... 03/2014", transcrito
 # DENTRO de um artigo alterador, entraria na espinha como se fosse dispositivo do documento.
@@ -61,14 +95,25 @@ CITA_OUTRA_NORMA = re.compile(
 
 
 def _fora_de_codigo(markdown):
-    """Itera (numero_da_linha, linha) ignorando o que esta dentro de ``` ```."""
-    dentro = False
-    for i, l in enumerate(markdown.split('\n'), 1):
+    """Devolve [(numero_da_linha, linha)] ignorando o que esta dentro de ``` ```.
+
+    Cerca ABERTA e nunca fechada nao pode cegar o resto do documento: LLM gera isso com
+    frequencia, e o merger concatena blocos gerados independentemente, entao uma cerca
+    aberta no bloco 2 apagaria tudo do bloco 2 em diante - inclusive o MARCA_BLOCO_AUSENTE
+    que o runner deixa gravado no artefato justamente para nao perder paginas em silencio.
+    Quando o total de cercas e impar, trata o documento inteiro como prosa.
+    """
+    linhas = markdown.split('\n')
+    fora, dentro = [], False
+    for i, l in enumerate(linhas, 1):
         if l.startswith('```'):
             dentro = not dentro
             continue
         if not dentro:
-            yield i, l
+            fora.append((i, l))
+    if dentro:
+        return [(i, l) for i, l in enumerate(linhas, 1) if not l.startswith('```')]
+    return fora
 
 
 def rebaixar_h1_extras(markdown):
@@ -129,7 +174,7 @@ def rebaixar_h1_extras(markdown):
         # titulo usa "N.o 168, DE 1o DE DEZEMBRO DE 2014" e escapava ao padrao.
         # Melhor errar por inercia que por estrago: avisa e devolve intacto.
         return markdown, [f"{len(h1s)} titulo(s) de nivel 1 e nenhum reconhecido como "
-                          f"titulo de ato - hierarquia NAO alterada; conferir a mao: "
+                          f"titulo de ato - {AVISO_NAO_ALTERADA}; conferir a mao: "
                           + "; ".join(f"L{i+1} '{linhas[i].lstrip('# ').strip()[:40]}'" for i in h1s)]
 
     for i in h1s:
@@ -172,7 +217,9 @@ def atos_no_documento(markdown):
         achados.append({
             "linha": i + 1,
             "especie": m.group(1).upper(),
-            "numero": f"{int(m.group(2))}/{m.group(3)}",
+            # group(3) e o ano da forma "165/2014"; group(4) o da forma "N.o 168, DE 1o DE
+            # DEZEMBRO DE 2014". Ler so o group(3) fazia a segunda virar "168/None".
+            "numero": f"{int(m.group(2).replace('.', ''))}/{m.group(3) or m.group(4)}",
             "texto": l.strip(' #*'),
         })
     return achados
@@ -183,7 +230,16 @@ def blocos_ausentes(markdown):
     return [l.strip() for _, l in _fora_de_codigo(markdown) if MARCA_BLOCO_AUSENTE in l]
 
 
-_ASPAS = re.compile(r'["\'“”‘’]([^"\'“”‘’]{2,80})["\'“”‘’]')
+# Delimitadores PAREADOS, e sem a aspa simples reta como abertura: em portugues ela e
+# apostrofo ("d'agua", "'ad referendum'"), e tratada como aspa ela truncava o termo citado
+# num fragmento curto ("o servidor d") que casa com quase qualquer texto final - fazendo o
+# filtro DESCARTAR um item legitimo, que e o erro mais grave que ele pode cometer.
+_ASPAS = re.compile(r'"([^"\n]{2,80})"|“([^”\n]{2,80})”|‘([^’\n]{2,80})’')
+
+
+def _termos_citados(descricao):
+    """Termos entre aspas na descricao do validador, em ordem de aparicao."""
+    return [next(g for g in m.groups() if g is not None) for m in _ASPAS.finditer(descricao)]
 
 # So estes tipos podem ser descartados pela presenca literal do termo. Para eles, o termo
 # citado ESTAR no texto final prova que o defeito sumiu: se a palavra omitida aparece, nao
@@ -219,7 +275,7 @@ def filtra_trechos_resolvidos(trechos, texto_final):
         if trecho.get("tipo") not in TIPOS_CHECAVEIS_POR_PRESENCA:
             resolvidos.append(trecho)   # defeito de forma: presenca do termo nao prova nada
             continue
-        termos = _ASPAS.findall(trecho.get("descricao", ""))
+        termos = _termos_citados(trecho.get("descricao", ""))
         if termos and termos[0] in texto_final:
             continue
         resolvidos.append(trecho)
@@ -284,9 +340,20 @@ def historico_sem_marcador(markdown):
     for i, p in enumerate(paragrafos):
         if not DECLARA_NOVA_REDACAO.search(p):
             continue
-        anteriores = paragrafos[max(0, i - 2):i]
+        # Sobe enquanto os paragrafos anteriores forem a redacao antiga (tachada). Janela
+        # fixa de 2 quebrava quando a redacao antiga ocupava caput + inciso: o marcador
+        # ficava 3 paragrafos atras e o portao acusava documento correto.
+        j = i
+        while j > 0 and '~~' in paragrafos[j - 1]:
+            j -= 1
+        anteriores = paragrafos[max(0, j - 1):i]
         janela = p + ''.join(anteriores)
-        if any(m in janela for m in _MARCADORES):
+        # So o marcador de REDACAO ANTERIOR conta aqui, e ainda precisa existir a redacao
+        # antiga em ~~tachado~~: aceitar qualquer marcador deixava o **[DISPOSITIVO
+        # REVOGADO]** do artigo de cima absolver este, e o defeito passava com zero avisos.
+        tem_marcador = _tem_marcador(janela, _MARCADOR_REDACAO_RE)
+        tem_tachado = any('~~' in x for x in anteriores)
+        if tem_marcador and tem_tachado:
             continue
         trecho = p.strip().replace('\n', ' ')[:70]
         achados.append(f'declara "(Redacao dada pela ...)" sem marcador por perto: "{trecho}..."')
@@ -316,14 +383,41 @@ def revogacao_sem_tachado(markdown):
         j = i
         while j > 0 and not ART_LINHA.match(linhas[j]):
             j -= 1
+        if not ART_LINHA.match(linhas[j]):
+            # A subida chegou ao topo sem achar caput: nao e dispositivo, e a nota de
+            # revogacao do ATO INTEIRO no cabecalho ("RESOLUCAO X (Revogada pela Y)"),
+            # forma padrao em resolucao de conselho. Acusar isso apontava a linha do
+            # titulo como dispositivo revogado orfao, em documento correto.
+            continue
         bloco = linhas[j:i + 1]
-        tachado = any('~~' in x for x in bloco)
+        # TACHADO PARCIAL tambem e defeito: o risco visual no PDF cobre o bloco inteiro
+        # (caput + paragrafos), mas a nota "(Artigo revogado pela ...)" so encosta na
+        # ultima frase. Aceitar UMA linha riscada em qualquer lugar do bloco deixava
+        # passar exatamente o quarto estado que validator_prompt e reconvert_prompt
+        # declaram reprovavel: caput e § 1o transcritos como vigentes, so o § 2o tachado.
+        substantivas = [x for x in bloco if x.strip() and not _tem_marcador(x)]
+        riscadas = [x for x in substantivas if '~~' in x]
+        tachado_completo = bool(substantivas) and len(riscadas) == len(substantivas)
         # O marcador pertence a ESTE dispositivo: tem de estar coladinho antes do caput.
-        marcado = any(mk in x for x in linhas[max(0, j - 3):j] for mk in _MARCADORES)
-        if not (tachado and marcado):
+        # Sobe pulando linha vazia, heading e comentario HTML - um "<!-- quebra -->" ou um
+        # "## CAPITULO II" entre o marcador e o caput nao descola um do outro.
+        k, marcado = j - 1, False
+        while k >= 0 and j - k <= 6:
+            bruta = linhas[k].strip()
+            if _tem_marcador(linhas[k]):
+                marcado = True
+                break
+            if bruta and not bruta.startswith(('#', '<!--')):
+                break
+            k -= 1
+        if not (tachado_completo and marcado):
             falta = []
-            if not tachado: falta.append('~~tachado~~')
-            if not marcado: falta.append('marcador **[DISPOSITIVO REVOGADO - ...]**')
+            if not riscadas:
+                falta.append('~~tachado~~')
+            elif not tachado_completo:
+                falta.append('~~tachado~~ no bloco INTEIRO (so parte do artigo esta riscada)')
+            if not marcado:
+                falta.append('marcador **[DISPOSITIVO REVOGADO - ...]**')
             achados.append((i + 1, ' e '.join(falta), l.strip()[:110]))
     return achados
 
@@ -333,8 +427,16 @@ def conferir(markdown):
     corrigido, mudancas = rebaixar_h1_extras(markdown)
     avisos = []
     if mudancas:
-        avisos.append("Hierarquia de titulos ajustada automaticamente:\n  - " +
-                      "\n  - ".join(mudancas))
+        # rebaixar_h1_extras devolve pelo mesmo canal duas coisas opostas: as mudancas que
+        # ELE fez, e o aviso de que NAO mexeu (nenhum '# ' reconhecido como titulo de ato).
+        # Sem separar, o segundo saia sob o cabecalho "ajustada automaticamente" - dizendo
+        # ao usuario que o documento foi corrigido, com um texto que diz que nao foi.
+        nao_alterada = [m for m in mudancas if AVISO_NAO_ALTERADA in m]
+        alterada = [m for m in mudancas if AVISO_NAO_ALTERADA not in m]
+        if alterada:
+            avisos.append("Hierarquia de titulos ajustada automaticamente:\n  - " +
+                          "\n  - ".join(alterada))
+        avisos.extend(f"ATENCAO: {m}" for m in nao_alterada)
     atos = atos_no_documento(corrigido)
     if len(atos) > 1:
         det = "; ".join(f"L{a['linha']} {a['especie']} {a['numero']}" for a in atos)

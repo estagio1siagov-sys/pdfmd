@@ -1,4 +1,5 @@
 from django import forms
+from django.conf import settings
 
 
 class MultipleFileInput(forms.ClearableFileInput):
@@ -22,9 +23,17 @@ class PdfUploadForm(forms.Form):
 
     def clean_pdf_files(self):
         files = self.cleaned_data["pdf_files"]
+        limite = settings.MAX_PDF_BYTES
         for f in files:
             if not f.name.lower().endswith(".pdf"):
                 raise forms.ValidationError(f"'{f.name}' não é um arquivo PDF.")
+            # Único limite de tamanho do lado do servidor. O aviso na tela de upload é
+            # JavaScript e só desabilita o botão — um `curl` direto passa por cima dele.
+            if f.size > limite:
+                raise forms.ValidationError(
+                    f"'{f.name}' tem {f.size / 1024 / 1024:.1f} MB e excede o limite de "
+                    f"{limite / 1024 / 1024:.0f} MB por arquivo."
+                )
             header = f.read(5)
             f.seek(0)
             if header != b"%PDF-":

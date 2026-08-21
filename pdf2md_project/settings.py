@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 
+import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -20,14 +22,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / '.env')
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-&w0&ac%$z8!w=py8dhj%#p^e!7x240qy6rnp*8_m!l=91z=6am',
-)
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
+# Default FALSE: falhar fechado. Com default True, uma variavel de ambiente nao setada
+# (ou escrita errada) no Render deixava o servico em DEBUG — vazando traceback e settings,
+# e pulando todo o bloco de hardening no fim deste arquivo. Para desenvolver local,
+# DJANGO_DEBUG=True esta no .env.example.
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False') == 'True'
+
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '')
+if not SECRET_KEY:
+    if not DEBUG:
+        # Nao cair no fallback embutido em producao: a chave estaria publicada no
+        # repositorio, permitindo forjar cookie assinado e token CSRF.
+        raise ImproperlyConfigured(
+            'DJANGO_SECRET_KEY nao definida. Obrigatoria quando DJANGO_DEBUG != True.'
+        )
+    SECRET_KEY = 'django-insecure-chave-apenas-para-desenvolvimento-local'
 
 ALLOWED_HOSTS = [h for h in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h]
 
@@ -92,12 +103,24 @@ WSGI_APPLICATION = 'pdf2md_project.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
+# DATABASE_URL era documentado como suportado, mas nunca era lido: `dj-database-url` estava
+# no requirements sem nenhum uso, e plugar um Postgres no Render nao mudava nada — todo o
+# estado dos jobs continuava no SQLite efemero, que some no restart.
+# OPTIONS so valem para SQLite: WAL deixa leitura e escrita concorrerem (o worker grava o
+# progresso do job a cada bloco enquanto a tela da fila le a cada 1,5s), e o timeout evita
+# "database is locked" nos picos, ja que o Gunicorn roda com --threads=4 e ha 3 threads de
+# worker gravando.
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': dj_database_url.config(
+        default=f'sqlite:///{BASE_DIR / "db.sqlite3"}',
+        conn_max_age=600,
+    )
 }
+if DATABASES['default'].get('ENGINE', '').endswith('sqlite3'):
+    DATABASES['default'].setdefault('OPTIONS', {}).update({
+        'timeout': 20,
+        'init_command': 'PRAGMA journal_mode=WAL;',
+    })
 
 
 # Password validation
@@ -154,10 +177,17 @@ MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Permite uploads de PDFs grandes (até 200 MB por requisição).
-# O padrão do Django é 2,5 MB, o que rejeita PDFs grandes com 400 Bad Request.
-DATA_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024  # 200 MB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 200 * 1024 * 1024  # 200 MB
+# NAO subir FILE_UPLOAD_MAX_MEMORY_SIZE. Ele é o limiar acima do qual o Django para de
+# segurar o upload na RAM e passa a gravar em arquivo temporário; com 200 MB, um envio
+# grande (ou 2-4 simultâneos, já que o Gunicorn roda --threads=4) estourava os 512 MB do
+# Render free tier e derrubava o worker por OOM. No default (2,5 MB) o arquivo é spoolado
+# pro disco e nada no pipeline precisa dele em memória — o splitter lê pelo caminho.
+# DATA_UPLOAD_MAX_MEMORY_SIZE também não precisava ser mexido: ele mede o corpo da
+# requisição EXCLUINDO os arquivos enviados, então nunca foi o que rejeitava PDF grande.
+# O limite de tamanho de PDF é aplicado em forms.py:clean_pdf_files, onde dá pra devolver
+# mensagem de erro em vez de 400 seco.
+# Uploads múltiplos: o default de DATA_UPLOAD_MAX_NUMBER_FILES (100) vale e é intencional.
+MAX_PDF_BYTES = int(os.environ.get('MAX_PDF_BYTES', 200 * 1024 * 1024))  # 200 MB por arquivo
 
 # Segurança extra quando rodando em produção (Render sempre serve via HTTPS).
 if not DEBUG:
@@ -165,4 +195,9 @@ if not DEBUG:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 60 * 60 * 24 * 7
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    # SECURE_HSTS_PRELOAD fica desligado de propósito: preload é submissão a uma lista
+    # embutida nos navegadores, difícil de reverter, e o serviço roda sob um domínio
+    # compartilhado (*.onrender.com). Só faz sentido com domínio próprio e HTTPS garantido
+    # em todos os subdomínios.
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')

@@ -26,15 +26,21 @@ urlpatterns = [
     path('', include('converter.urls')),
 ]
 
-# Serve mídia (PDFs enviados e Markdown gerado) tanto em DEBUG quanto em produção.
+# Serve o RESULTADO (Markdown gerado) tanto em DEBUG quanto em produção.
 # Não uso django.conf.urls.static.static() aqui porque ele só registra a rota
 # quando settings.DEBUG é True, mesmo fora desse if — e aqui rodamos com DEBUG=False
 # em produção. É um app de baixo volume/uso pessoal e os arquivos são efêmeros de
 # propósito (não persistem entre reinícios do serviço), então não há storage externo (S3).
+#
+# document_root aponta para MEDIA_ROOT/results, NÃO para MEDIA_ROOT: apontando para a raiz,
+# a rota também servia MEDIA_ROOT/uploads, deixando o PDF ORIGINAL enviado acessível pela
+# web por quem soubesse o nome do arquivo (o Django só acrescenta sufixo aleatório quando há
+# colisão de nome, então "contrato.pdf" fica em /media/uploads/contrato.pdf).
+# Travessia de caminho não é problema aqui — django.views.static.serve usa safe_join.
 urlpatterns += [
     re_path(
-        r'^%s(?P<path>.*)$' % re.escape(settings.MEDIA_URL.lstrip('/')),
+        r'^%sresults/(?P<path>.*)$' % re.escape(settings.MEDIA_URL.lstrip('/')),
         serve_static,
-        {'document_root': settings.MEDIA_ROOT},
+        {'document_root': settings.MEDIA_ROOT / 'results'},
     ),
 ]
