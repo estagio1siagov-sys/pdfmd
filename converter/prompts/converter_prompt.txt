@@ -50,6 +50,32 @@ CONTEÚDO QUE SÓ EXISTE COMO IMAGEM (organograma, fluxograma, tabela digitaliza
  **[TRANSCRIÇÃO DE IMAGEM — organograma do Anexo I]**
 A conferência de recepção compara a sua transcrição com o texto extraível do PDF, e o extrator não enxerga imagem. Transcrição sem essa marca é lida como conteúdo inventado, e a entrega reprova mesmo estando certa.
 
+DISPOSITIVO REVOGADO OU COM REDACAO SUBSTITUIDA: TRANSCREVA E MARQUE — NUNCA EXCLUA.
+Textos compilados trazem o historico do dispositivo: a redacao ANTIGA e a NOVA, uma seguida da outra, e os artigos REVOGADOS preservados no lugar. No PDF isso costuma aparecer TACHADO (riscado). Excluir o trecho tachado parece resolver a repeticao, mas cria uma omissao silenciosa: o acervo perde o dispositivo, perde a informacao de que ele existiu e perde por qual norma foi revogado. Medido na RN-TC 01/2017 do TCE-PB, cujos arts. 9o e 10 sumiram do .md e do acervo — e o acervo serve analise temporal: para auditar exercicio de 2018, vale a redacao de 2017, nao a de 2025.
+
+COMO IDENTIFICAR — duas vias, use as duas:
+ (a) MARCA TEXTUAL, a principal, porque nao depende de enxergar formatacao: o proprio documento escreve, colado ao dispositivo, "(Artigo revogado pela Resolucao Normativa TC no 06/2020, publicada no Diario Oficial Eletronico do TCE/PB, de 22 de dezembro de 2020)" ou "(Redacao dada pela Resolucao Normativa TC no 01/2025, ...)". Onde houver "(Redacao dada pela ...)", o bloco IMEDIATAMENTE ANTERIOR com o mesmo numero de artigo/paragrafo e a redacao antiga.
+ (b) TACHADO: o trecho vem riscado na pagina.
+
+COMO TRANSCREVER — marcador em linha isolada ANTES do bloco, e o texto em ~~tachado~~:
+
+ **[DISPOSITIVO REVOGADO — art. 9o, pela RN-TC no 06/2020, DOE-TCE/PB de 22/12/2020]**
+
+ ~~**Art. 9o.** Apos o processamento do balancete relativo a dezembro de cada exercicio, sera elaborado o Relatorio Previo...~~
+
+ ~~**Paragrafo unico.** So havera nova intimacao...~~ (Artigo revogado pela Resolucao Normativa TC no 06/2020, publicada no Diario Oficial Eletronico do TCE/PB, de 22 de dezembro de 2020)
+
+E para redacao substituida — as DUAS ficam, na ordem em que o documento as traz:
+
+ **[REDACAO ANTERIOR — art. 4o, substituida pela RN-TC no 06/2020]**
+
+ ~~**Art. 4o.** Ato da Presidencia do Tribunal definira os procedimentos de auditoria...~~
+
+ **Art. 4o.** Ato do Presidente do Tribunal aprovara os procedimentos de auditoria propostos pelo Diretor de Auditoria e Fiscalizacao. (Redacao dada pela Resolucao Normativa TC no 06/2020, ...)
+
+POR QUE O MARCADOR, E NAO SO O ~~TACHADO~~: a busca do acervo e semantica e IGNORA marcacao — o ~~ e sinal para o olho humano, nao para a maquina. O marcador **[...]** e TEXTO, entao a busca recupera o dispositivo ja com "REVOGADO" na mesma passagem, e ninguem cita como vigente o que nao esta mais. Mesma logica da marca de transcricao de imagem, acima.
+Se o documento nao disser por qual norma, escreva **[DISPOSITIVO REVOGADO — norma revogadora nao declarada no documento]**. Nao deduza, nao complete.
+
 UM PDF PODE CONTER MAIS DE UM ATO. Depois de um bloco de assinaturas pode começar outro ato autônomo, com cabeçalho próprio, outro preâmbulo, outros CONSIDERANDO e outro fecho com data diferente — ex.: um PDF de 4 páginas com a RESOLUÇÃO CRM-PB nº 165/2014 nas páginas 1-2 e a PORTARIA CRM-PB nº 16/2014 nas páginas 3-4. Transcreva TODOS. Não pare no primeiro fecho de assinatura e não funda um ato no outro: cada ato começa com o seu próprio cabeçalho, em linha isolada.
 IGNORE COMPLETAMENTE: Blocos de verificação de assinaturas, hashes, códigos de validação digital, dados de signatários (CPF, data/hora), rodapés com numeração de página automática, rubricas (assinaturas manuscritas/iniciais sobrepostas ao texto) e carimbos (incluindo qualquer data, número ou texto que esteja dentro de um carimbo, mesmo que pareça relevante — carimbos NUNCA são conteúdo oficial do documento).
 IMPORTANTE: ignorar a rubrica significa ignorar apenas o traço/rabisco manuscrito em si. Se houver texto impresso/datilografado legível na mesma linha, atrás, ao lado ou parcialmente sobreposto por uma rubrica ou assinatura, esse texto é conteúdo oficial e DEVE ser transcrito normalmente — a presença de uma rubrica na região NÃO dispensa a transcrição do texto impresso ali. Só use [TRECHO ILEGÍVEL] se a rubrica realmente cobrir o texto a ponto de torná-lo impossível de ler.

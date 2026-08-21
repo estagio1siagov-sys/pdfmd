@@ -26,6 +26,39 @@ GATILHO = re.compile(r'^\s*\**\s*(RESOLVE|RESOLVEM|CONSIDERANDO|CONSIDERENDO|O\s
 
 MARCA_BLOCO_AUSENTE = "<!-- SINGRA:BLOCO-AUSENTE"
 
+# --- Dispositivo revogado / redacao substituida (SINGRA, 21/08/2026) ---
+# Texto compilado traz o historico: a redacao antiga e a nova, e os artigos revogados
+# preservados no lugar, tachados na pagina. O conversor vinha EXCLUINDO o trecho tachado
+# para nao repetir texto - e criava omissao silenciosa. Medido na RN-TC 01/2017 do TCE-PB:
+# os arts. 9o e 10, revogados pela RN-TC 06/2020 e PRESERVADOS no PDF com a marca, sumiram
+# do .md; o documento saltava do art. 8o para o art. 11 e passou por DUAS conversoes assim.
+MARCA_REVOGADO = "**[DISPOSITIVO REVOGADO"
+MARCA_REDACAO_ANTERIOR = "**[REDACAO ANTERIOR"
+# aceita com e sem acento - o marcador e escrito por LLM
+_MARCADORES = (MARCA_REVOGADO, MARCA_REDACAO_ANTERIOR, "**[REDAÇÃO ANTERIOR")
+
+# O proprio documento declara, colado ao dispositivo. Sobrevive ao pdftotext: nao depende
+# de enxergar o tachado.
+DECLARA_REVOGACAO = re.compile(r'\(\s*(?:Artigo|Paragrafo|Par[áa]grafo|Inciso|Al[íi]nea|Item)?\s*revogad[oa]s?\s+pel[ao]', re.I)
+DECLARA_NOVA_REDACAO = re.compile(r'\(\s*Reda[çc][ãa]o\s+dada\s+pel[ao]', re.I)
+
+# Artigo no inicio da linha, tolerando ~~tachado~~ e **negrito**.
+# O terminador e' LOOKAHEAD e inclui '**': "**Art. 10** - texto" e a forma mais comum de
+# artigo em markdown, e um terminador que so aceitasse [ºo°.-] a perderia em silencio -
+# apanhado pelo test_salto_legitimo_do_orgao ao escrever a propria peca.
+ART_LINHA = re.compile(r'^\s*~{0,2}\s*\**\s*Art(?:igo)?\.?\s*(\d{1,3})\s*(?=[ºo°.,\-–)]|\*\*|\s|$)', re.I)
+# Lixo de marcacao entre o numero e o texto ("**", "º.", "~~") - limpo antes de testar citacao.
+_SOBRA_MARCACAO = re.compile(r'\A\s*(?:[ºo°.,\-–)]|\*\*|~~)+')
+# v1.6.2 do conferente: candidato seguido de PREPOSICAO + especie normativa e CITACAO de
+# outra norma, nao artigo proprio. Sem isto, "Art. 10 da Resolucao ... 03/2014", transcrito
+# DENTRO de um artigo alterador, entraria na espinha como se fosse dispositivo do documento.
+CITA_OUTRA_NORMA = re.compile(
+    r'\A\s*(?:d[aoe]s?|no|na|nos|nas|pelo|pela)\s+'
+    r'(?:Constitui[çc][ãa]o|Carta\s+Magna|CF\b|Lei\s+Org[âa]nica|Regimento|RITCE|LOTCE|'
+    r'(?:Lei\s+Complementar|Leis?|Decretos?|Resolu[çc][ãa]o|Portaria|Emenda|EC|LC|IN)'
+    r'\s*(?:Normativa\s*)?(?:[A-Z-]{2,8}\s*)?(?:n[.ºo°]|\d))', re.I)
+
+
 
 def _fora_de_codigo(markdown):
     """Itera (numero_da_linha, linha) ignorando o que esta dentro de ``` ```."""
@@ -193,6 +226,60 @@ def filtra_trechos_resolvidos(trechos, texto_final):
     return resolvidos
 
 
+def espinha_de_artigos(markdown):
+    """Numeros de artigo PROPRIOS do documento, em ordem de aparicao.
+
+    Descarta o que for CITACAO de outra norma ("Art. 10 da Resolucao Normativa RN-TC
+    No 03/2014"), que aparece dentro de artigo alterador e nao e dispositivo daqui.
+    """
+    nums = []
+    for _, l in _fora_de_codigo(markdown):
+        m = ART_LINHA.match(l)
+        if not m:
+            continue
+        resto = _SOBRA_MARCACAO.sub(' ', l[m.end():])
+        if CITA_OUTRA_NORMA.match(resto):
+            continue
+        n = int(m.group(1))
+        if n not in nums:
+            nums.append(n)
+    return nums
+
+
+def buracos_na_espinha(markdown):
+    """Numeros faltantes entre o primeiro e o ultimo artigo do documento.
+
+    ATENCAO - ISTO NAO E PROVA DE OMISSAO, E PERGUNTA. Buraco legitimo existe: a
+    PORTARIA CRM-PB 16/2014 salta do art. 3o para o art. 10 NO DOCUMENTO OFICIAL, e
+    preservar esse salto e obrigacao (Regra 8). Por isso o resultado vira AVISO, nunca
+    correcao automatica - quem decide e a conferencia contra o PDF-fonte.
+    """
+    nums = espinha_de_artigos(markdown)
+    if len(nums) < 2:
+        return []
+    ordenados = sorted(nums)
+    return [n for n in range(ordenados[0], ordenados[-1] + 1) if n not in nums]
+
+
+def historico_sem_marcador(markdown):
+    """Documento que DECLARA revogacao/nova redacao mas nao traz o marcador exigido.
+
+    Duas leituras possiveis, e o aviso nao escolhe entre elas:
+      - o conversor EXCLUIU o dispositivo tachado (omissao - o caso da RN-TC 01/2017); ou
+      - transcreveu o texto mas nao declarou o marcador (defeito de forma).
+    Em ambos, o arquivo nao pode seguir sem olho humano.
+    """
+    tem_marcador = any(m in markdown for m in _MARCADORES)
+    if tem_marcador:
+        return []
+    achados = []
+    if DECLARA_REVOGACAO.search(markdown):
+        achados.append('o documento declara "(... revogado pela ...)"')
+    if DECLARA_NOVA_REDACAO.search(markdown):
+        achados.append('o documento declara "(Redacao dada pela ...)"')
+    return achados
+
+
 def conferir(markdown):
     """Roda tudo e devolve (markdown_corrigido, avisos). Avisos nao vazios => needs_review."""
     corrigido, mudancas = rebaixar_h1_extras(markdown)
@@ -212,4 +299,23 @@ def conferir(markdown):
     if aus:
         avisos.append(f"ATENCAO: {len(aus)} bloco(s) de pagina nao entraram no arquivo:\n  - " +
                       "\n  - ".join(aus))
+
+    # Dispositivo revogado / redacao substituida (21/08/2026)
+    hist = historico_sem_marcador(corrigido)
+    if hist:
+        avisos.append(
+            "ATENCAO: " + " e ".join(hist) + ", mas NAO ha marcador "
+            "**[DISPOSITIVO REVOGADO - ...]** nem **[REDACAO ANTERIOR - ...]** no arquivo. "
+            "Ou o trecho tachado foi EXCLUIDO (omissao - foi o que aconteceu com os arts. 9o e "
+            "10 da RN-TC 01/2017), ou foi transcrito sem declarar. Conferir contra o PDF."
+        )
+    furos = buracos_na_espinha(corrigido)
+    if furos:
+        avisos.append(
+            f"ATENCAO: a numeracao dos artigos salta - faltam {furos} entre o primeiro e o "
+            "ultimo do documento. ISTO NAO E PROVA DE OMISSAO: o salto pode estar no proprio "
+            "ato (a Portaria CRM-PB 16/2014 pula do art. 3o ao 10 no original, e o salto se "
+            "preserva). Mas pode ser dispositivo revogado que foi excluido em vez de marcado. "
+            "Conferir o intervalo contra o PDF-fonte antes de aprovar."
+        )
     return corrigido, avisos

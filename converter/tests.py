@@ -13,6 +13,9 @@ from converter.pipeline.portoes import (
     conferir,
     filtra_trechos_resolvidos,
     rebaixar_h1_extras,
+    espinha_de_artigos,
+    buracos_na_espinha,
+    historico_sem_marcador,
 )
 
 
@@ -149,3 +152,89 @@ class FiltroDeTrechosResolvidosTest(SimpleTestCase):
     def test_sem_termo_entre_aspas_mantem_por_seguranca(self):
         trechos = [{"tipo": "omissao", "descricao": "Falta um parágrafo inteiro no meio do Art. 4."}]
         self.assertEqual(len(filtra_trechos_resolvidos(trechos, "qualquer texto")), 1)
+
+
+class DispositivoRevogadoTest(SimpleTestCase):
+    """Dispositivo revogado / redacao substituida - SINGRA, 21/08/2026.
+
+    Caso-ancora: RN-TC 01/2017 do TCE-PB. O PDF preserva os arts. 9o e 10 tachados, com
+    "(Artigo revogado pela Resolucao Normativa TC no 06/2020 ...)"; o conversor os excluiu
+    para nao repetir texto, e o .md saltou do art. 8o para o art. 11. Passou por DUAS
+    conversoes independentes sem ser detectado, e chegou ao acervo.
+    """
+
+    RNTC_COMO_SAIU = (
+        "# RESOLUCAO NORMATIVA RN-TC No 01/2017\n\n"
+        "**Art. 8o.** Os autos eletronicos do Processo de Acompanhamento da Gestao deverao "
+        "ser juntados ao respectivo Processo de Prestacao de Contas Anual. "
+        "(Redacao dada pela Resolucao Normativa TC no 01/2025)\n\n"
+        "## CAPITULO III\n\n"
+        "**Art. 11.** O balancete declarado como nao entregue ensejara as penalidades previstas.\n"
+    )
+
+    RNTC_COMO_DEVE_SAIR = (
+        "# RESOLUCAO NORMATIVA RN-TC No 01/2017\n\n"
+        "**Art. 8o.** Os autos eletronicos do Processo de Acompanhamento da Gestao deverao "
+        "ser juntados ao respectivo Processo de Prestacao de Contas Anual. "
+        "(Redacao dada pela Resolucao Normativa TC no 01/2025)\n\n"
+        "**[DISPOSITIVO REVOGADO - art. 9o, pela RN-TC no 06/2020, DOE-TCE/PB de 22/12/2020]**\n\n"
+        "~~**Art. 9o.** Apos o processamento do balancete relativo a dezembro de cada exercicio, "
+        "sera elaborado o Relatorio Previo sobre a Gestao do Poder ou Orgao.~~ "
+        "(Artigo revogado pela Resolucao Normativa TC no 06/2020)\n\n"
+        "## CAPITULO III\n\n"
+        "**[DISPOSITIVO REVOGADO - art. 10, pela RN-TC no 06/2020, DOE-TCE/PB de 22/12/2020]**\n\n"
+        "~~**Art. 10.** O Gestor quando da apresentacao da respectiva Prestacao de Contas Anual "
+        "devera, a titulo de defesa, esclarecer todas as irregularidades.~~ "
+        "(Artigo revogado pela Resolucao Normativa TC no 06/2020)\n\n"
+        "**Art. 11.** O balancete declarado como nao entregue ensejara as penalidades previstas.\n"
+    )
+
+    def test_exclusao_do_revogado_e_apanhada_pelo_buraco_na_espinha(self):
+        self.assertEqual(buracos_na_espinha(self.RNTC_COMO_SAIU), [9, 10])
+
+    def test_exclusao_do_revogado_e_apanhada_pela_marca_sem_marcador(self):
+        achados = historico_sem_marcador(self.RNTC_COMO_SAIU)
+        self.assertTrue(achados)
+
+    def test_conferir_avisa_nos_dois_eixos(self):
+        _, avisos = conferir(self.RNTC_COMO_SAIU)
+        texto = "\n".join(avisos)
+        self.assertIn("DISPOSITIVO REVOGADO", texto)
+        self.assertIn("numeracao dos artigos salta", texto)
+
+    def test_transcricao_correta_nao_gera_aviso_de_historico(self):
+        _, avisos = conferir(self.RNTC_COMO_DEVE_SAIR)
+        texto = "\n".join(avisos)
+        self.assertNotIn("nao ha marcador", texto.lower())
+        self.assertNotIn("numeracao dos artigos salta", texto)
+
+    def test_artigo_tachado_entra_na_espinha(self):
+        self.assertEqual(espinha_de_artigos(self.RNTC_COMO_DEVE_SAIR), [8, 9, 10, 11])
+
+    def test_salto_legitimo_do_orgao_e_apenas_AVISO_nunca_correcao(self):
+        """Portaria CRM-PB 16/2014: o original pula do art. 3o ao 10. Preservar e obrigacao."""
+        portaria = (
+            "# PORTARIA CRM-PB no 16/2014\n\n"
+            "**Art. 1o** - Os conselheiros farao jus a diaria.\n\n"
+            "**Art. 2o** - Os funcionarios farao jus a diaria.\n\n"
+            "**Art. 3o** - Fica estabelecido o valor da verba indenizatoria.\n\n"
+            "**Art. 10** - Fica estabelecido o valor do auxilio de representacao.\n\n"
+            "**Art. 11** - Caso os valores ultrapassem os limites do CFM.\n"
+        )
+        corrigido, avisos = conferir(portaria)
+        self.assertEqual(corrigido, portaria)          # NAO tocou no documento
+        self.assertIn("NAO E PROVA DE OMISSAO", "\n".join(avisos))
+
+    def test_citacao_de_artigo_de_outra_norma_nao_entra_na_espinha(self):
+        """Art. 14 da RN-TC 01/2017 transcreve o art. 10 da RN-TC 03/2014."""
+        md = (
+            "# RESOLUCAO NORMATIVA RN-TC No 01/2017\n\n"
+            "**Art. 13.** Durante o exercicio financeiro objeto do acompanhamento.\n\n"
+            "**Art. 14.** O art. 10 da Resolucao Normativa RN-TC No 03/2014 passa a vigorar "
+            "com a seguinte redacao:\n\n"
+            "**Art. 10.** da Resolucao Normativa RN-TC No 03/2014 - Os balancetes mensais nao "
+            "gozarao da possibilidade de substituicao.\n\n"
+            "**Art. 15.** Esta Resolucao entra em vigor na data da sua publicacao.\n"
+        )
+        self.assertNotIn(10, espinha_de_artigos(md))
+        self.assertEqual(espinha_de_artigos(md), [13, 14, 15])
